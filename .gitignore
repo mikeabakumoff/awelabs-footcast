@@ -1,0 +1,24 @@
+# Secrets — the loader reads a file literally named env
+env
+.env
+
+# Data: collected from third-party APIs, not redistributable
+data/
+*.db
+*.db-journal
+
+# ...except the small published sample
+!sample/sample.db
+
+# Trained artefacts — rebuild with train_models.py
+models/
+*.pkl
+
+# Logs and caches
+*.log
+__pycache__/
+*.pyc
+venv/
+
+# Backups this project makes before risky edits
+*.before_*
