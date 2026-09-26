@@ -6,7 +6,7 @@ conn = sqlite3.connect(DB_PATH)
 
 cols = {
     "fg_player":      "TEXT",
-    "fg_team":        "TEXT", 
+    "fg_team":        "TEXT",
     "fg_minute":      "INTEGER",
     "real_fg_player": "TEXT",
     "real_fg_team":   "TEXT",

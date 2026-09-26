@@ -1,21 +1,3 @@
-"""
-agent_collector.py — ML-агенты N1–N4
-
-Каждая модель — автономный агент:
-  N1 — ищет форму команды (последние 5 матчей) через web search
-  N2 — ищет H2H историю
-  N3 — котировки (уже есть через odds-api)
-  N4 — ищет контекст: место в таблице, травмы, дней отдыха
-
-Если данных нет в БД или ESPN недоступен:
-  → Claude API с web_search ищет актуальные данные
-  → Парсит ответ в структурированный dict
-  → Сохраняет в БД таблицу live_stats
-  → Возвращает данные для ML-моделей
-
-Требует: ANTHROPIC_API_KEY в конфиге
-"""
-
 import json
 import time
 import logging
@@ -28,12 +10,12 @@ from datetime import datetime, timezone
 log = logging.getLogger(__name__)
 DB_PATH = Path("data/epl_target_teams.db")
 
-# ── API ───────────────────────────────────────────────────────────────────────
-ANTHROPIC_API_KEY = ""   # вставьте свой ключ или читайте из .env
+
+ANTHROPIC_API_KEY = ""
 ANTHROPIC_URL     = "https://api.anthropic.com/v1/messages"
 MODEL             = "claude-sonnet-4-20250514"
 
-# ── Схема таблицы живой статистики ───────────────────────────────────────────
+
 LIVE_STATS_SCHEMA = """
 CREATE TABLE IF NOT EXISTS live_stats (
     id           INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -56,7 +38,6 @@ def _init_db():
 
 
 def _save_to_db(conn, team: str, stat_type: str, data: dict, source: str):
-    """Сохраняет/обновляет статистику в БД."""
     now  = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     season = "2025-26"
     try:
@@ -75,7 +56,6 @@ def _save_to_db(conn, team: str, stat_type: str, data: dict, source: str):
 
 
 def _load_from_db(conn, team: str, stat_type: str) -> dict | None:
-    """Загружает статистику из БД если она свежая (не старше 6 часов)."""
     try:
         row = conn.execute("""
             SELECT data_json, updated_at FROM live_stats
@@ -83,7 +63,7 @@ def _load_from_db(conn, team: str, stat_type: str) -> dict | None:
         """, (team, stat_type)).fetchone()
         if not row:
             return None
-        # Проверяем свежесть
+
         updated = datetime.fromisoformat(row[1].replace("Z","+00:00"))
         age_h = (datetime.now(timezone.utc) - updated).total_seconds() / 3600
         if age_h > 24:
@@ -94,15 +74,7 @@ def _load_from_db(conn, team: str, stat_type: str) -> dict | None:
         return None
 
 
-# ═══════════════════════════════════════════════════════════════════════════════
-#  Claude API с web search
-# ═══════════════════════════════════════════════════════════════════════════════
-
 def _claude_search(prompt: str, max_tokens: int = 800) -> str | None:
-    """
-    Вызывает Claude API с web_search tool.
-    Возвращает текстовый ответ или None при ошибке.
-    """
     if not ANTHROPIC_API_KEY:
         return None
 
@@ -129,7 +101,7 @@ def _claude_search(prompt: str, max_tokens: int = 800) -> str | None:
             return None
 
         data = r.json()
-        # Собираем все текстовые блоки
+
         texts = [b["text"] for b in data.get("content", []) if b.get("type") == "text"]
         return "\n".join(texts) if texts else None
 
@@ -139,16 +111,15 @@ def _claude_search(prompt: str, max_tokens: int = 800) -> str | None:
 
 
 def _parse_json_from_text(text: str) -> dict | None:
-    """Извлекает JSON из ответа Claude."""
     import re
-    # Ищем ```json ... ``` блок
+
     m = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", text, re.DOTALL)
     if m:
         try:
             return json.loads(m.group(1))
         except Exception:
             pass
-    # Ищем просто { ... }
+
     m = re.search(r"(\{[^{}]*\})", text, re.DOTALL)
     if m:
         try:
@@ -158,30 +129,22 @@ def _parse_json_from_text(text: str) -> dict | None:
     return None
 
 
-# ═══════════════════════════════════════════════════════════════════════════════
-#  N1-АГЕНТ — Форма команды
-# ═══════════════════════════════════════════════════════════════════════════════
-
 def n1_agent_form(team: str, conn=None) -> dict:
-    """
-    N1-агент: собирает форму команды (последние 5 матчей).
-    Порядок: matches_features БД → Claude web search → дефолт.
-    """
     if conn is None:
         conn = _init_db()
 
-    # Нормализуем имя команды к виду в БД
+
     from run_bot import TEAM_NORM
     db_team = TEAM_NORM.get(team, team)
 
-    # 1. Проверяем кеш в live_stats БД
+
     cached = _load_from_db(conn, db_team, "form")
     if cached:
         log.info(f"  ✅ N1 {team}: форма из кеша БД")
         cached["source"] = "DB_cache"
         return cached
 
-    # 2. Берём из matches_features — всегда надёжно
+
     from live_collector import _form_from_db
     form = _form_from_db(db_team)
     if form:
@@ -189,7 +152,7 @@ def n1_agent_form(team: str, conn=None) -> dict:
         log.info(f"  ✅ N1 {team}: форма из matches_features")
         return form
 
-    # 3. Claude web search — только если в БД совсем нет данных
+
     log.info(f"  🔍 N1 {team}: нет в БД — ищу через Claude web search...")
     prompt = f"""Find the last 5 completed football matches for {team} in the current 2025-26 season.
 For each match provide: date, opponent, goals scored, goals conceded, result (W/D/L).
@@ -222,7 +185,7 @@ Return ONLY a JSON object like:
             return parsed
         log.warning(f"  ❗ N1 {team}: Claude ответил, но JSON не распарсился")
 
-    # Финальный fallback — нейтральные значения
+
     log.warning(f"  ❗ N1 {team}: нет данных, используем нейтральные")
     return {
         "pts_avg": 1.2, "win_rate": 0.33, "draw_rate": 0.25, "loss_rate": 0.42,
@@ -231,26 +194,15 @@ Return ONLY a JSON object like:
     }
 
 
-# ═══════════════════════════════════════════════════════════════════════════════
-#  N2-АГЕНТ — H2H история
-# ═══════════════════════════════════════════════════════════════════════════════
-
 def n2_agent_h2h(home: str, away: str, conn=None) -> dict:
-    """
-    N2-агент: собирает H2H статистику.
-    Порядок: БД (кеш) → Claude web search.
-    """
     if conn is None:
         conn = _init_db()
 
 def n2_agent_h2h(home: str, away: str, conn=None) -> dict:
-    """
-    N2-агент: H2H история из matches_features (все встречи за 8 сезонов).
-    """
     if conn is None:
         conn = _init_db()
 
-    # Нормализуем имена
+
     from run_bot import TEAM_NORM
     db_home = TEAM_NORM.get(home, home)
     db_away = TEAM_NORM.get(away, away)
@@ -261,7 +213,7 @@ def n2_agent_h2h(home: str, away: str, conn=None) -> dict:
         log.info(f"  ✅ N2 {home} vs {away}: H2H из кеша БД")
         return cached
 
-    # Берём ВСЕ встречи из matches_features
+
     try:
         import sqlite3 as _sq
         import pandas as pd
@@ -305,22 +257,14 @@ def n2_agent_h2h(home: str, away: str, conn=None) -> dict:
     except Exception as e:
         log.debug(f"N2 H2H DB error: {e}")
 
-    # Дефолт
+
     log.info(f"  ⚠ N2 {home} vs {away}: нет H2H в БД, используем нейтральные")
     return {"h2h_n":5,"h2h_home_wr":0.4,"h2h_away_wr":0.3,"h2h_draw_r":0.3,
             "h2h_avg_goals":2.6,"source":"default"}
 
 
-# ═══════════════════════════════════════════════════════════════════════════════
-#  N4-АГЕНТ — Контекст (таблица, травмы, отдых)
-# ═══════════════════════════════════════════════════════════════════════════════
-
 def n4_agent_context(team: str, match_date: str, league_key: str = "soccer_epl",
                      conn=None) -> dict:
-    """
-    N4-агент: позиция в таблице — из api_standings (API-Football).
-    Дни отдыха — из последнего матча в matches_features.
-    """
     if conn is None:
         conn = _init_db()
 
@@ -353,8 +297,7 @@ def n4_agent_context(team: str, match_date: str, league_key: str = "soccer_epl",
 
         c2 = _sq.connect(DB_PATH)
 
-        # 1. Позиция из api_standings (API-Football) — самый точный источник
-        # Используем полное API имя для поиска в таблицах
+
         _API_NAMES = {
             "Man City": "Manchester City", "Man United": "Manchester United",
             "Newcastle": "Newcastle United", "Wolves": "Wolverhampton",
@@ -375,7 +318,7 @@ def n4_agent_context(team: str, match_date: str, league_key: str = "soccer_epl",
             table_position = int(api_pos[0])
             log.info(f"  ✅ N4 {team}: позиция из API-Football = {table_position}")
         else:
-            # Fallback: считаем из matches_raw
+
             season = "2025-2026"
             league_map = {
                 "soccer_epl": "E0", "soccer_spain_la_liga": "SP1",
@@ -404,7 +347,7 @@ def n4_agent_context(team: str, match_date: str, league_key: str = "soccer_epl",
                         table_position = i
                         break
 
-        # 2. Дата последнего матча из matches_features
+
         last_row = c2.execute("""
             SELECT date FROM matches_features
             WHERE home_team=? OR away_team=?
@@ -420,7 +363,7 @@ def n4_agent_context(team: str, match_date: str, league_key: str = "soccer_epl",
             except Exception:
                 days_rest = 7.0
 
-        # 3. Количество травмированных из injuries (API-Football)
+
         inj = c2.execute("""
             SELECT COUNT(*) FROM injuries
             WHERE LOWER(team_name) LIKE ?
@@ -454,10 +397,10 @@ def n4_agent_context(team: str, match_date: str, league_key: str = "soccer_epl",
 
         c2 = _sq.connect(DB_PATH)
 
-        # Текущий сезон
+
         season = "2025-2026"
 
-        # Все матчи команды в текущем сезоне
+
         df = pd.read_sql("""
             SELECT date, home_team, away_team, fthg, ftag, ftr
             FROM matches_raw
@@ -467,7 +410,7 @@ def n4_agent_context(team: str, match_date: str, league_key: str = "soccer_epl",
         """, c2, params=(season, db_team, db_team))
 
         if not df.empty:
-            # Дата последнего матча
+
             last_match_date = str(df.iloc[0]["date"])[:10]
             try:
                 ld = date.fromisoformat(last_match_date)
@@ -476,7 +419,7 @@ def n4_agent_context(team: str, match_date: str, league_key: str = "soccer_epl",
             except Exception:
                 days_rest = 7.0
 
-        # Считаем таблицу — все команды в лиге текущего сезона
+
         league_map = {
             "soccer_epl":               "E0",
             "soccer_spain_la_liga":     "SP1",
@@ -494,7 +437,7 @@ def n4_agent_context(team: str, match_date: str, league_key: str = "soccer_epl",
         c2.close()
 
         if len(all_matches) > 5:
-            # Считаем очки для каждой команды
+
             standings = {}
             for _, row in all_matches.iterrows():
                 h, a = row["home_team"], row["away_team"]
@@ -509,7 +452,7 @@ def n4_agent_context(team: str, match_date: str, league_key: str = "soccer_epl",
                     standings[h] += 1
                     standings[a] += 1
 
-            # Сортируем и находим позицию нашей команды
+
             sorted_teams = sorted(standings.items(), key=lambda x: x[1], reverse=True)
             for i, (t, pts) in enumerate(sorted_teams, 1):
                 if t == db_team:
@@ -533,16 +476,7 @@ def n4_agent_context(team: str, match_date: str, league_key: str = "soccer_epl",
     return result
 
 
-# ═══════════════════════════════════════════════════════════════════════════════
-#  ГЛАВНАЯ ФУНКЦИЯ — заменяет collect_match_features из live_collector
-# ═══════════════════════════════════════════════════════════════════════════════
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-#  N5-АГЕНТ НОВОСТЕЙ — травмы, дисквалификации, скандалы, форс-мажор
-# ═══════════════════════════════════════════════════════════════════════════════
-
-_news_cache: dict = {}   # "team" → news dict, TTL 12 часов
+_news_cache: dict = {}
 
 
 def _news_cache_valid(team: str) -> bool:
@@ -553,11 +487,7 @@ def _news_cache_valid(team: str) -> bool:
 
 
 def n5_agent_news(team: str, match_date: str) -> dict:
-    """
-    Агент новостей: сначала берёт реальные травмы из injuries (API-Football),
-    затем дополняет через Claude web search если нет данных.
-    """
-    # Кеш включает дату матча чтобы разные матчи не мешали друг другу
+
     cache_key = team + "_" + match_date
     if cache_key in _news_cache:
         log.info(f"  📰 Новости {team}: из кеша")
@@ -578,7 +508,7 @@ def n5_agent_news(team: str, match_date: str) -> dict:
     from run_bot import TEAM_NORM
     db_team = TEAM_NORM.get(team, team)
 
-    # Обратный маппинг: краткое имя -> полное для поиска в API таблицах
+
     API_TEAM_NAMES = {
         "Man City":    "Manchester City",
         "Man United":  "Manchester United",
@@ -594,12 +524,12 @@ def n5_agent_news(team: str, match_date: str) -> dict:
         "Paris SG":    "Paris Saint",
         "Paris FC":    "Paris FC",
     }
-    # Используем полное имя для поиска в API таблицах
+
     api_team = API_TEAM_NAMES.get(db_team, db_team)
-    # Берём первые 6 символов для LIKE поиска
+
     search_term = api_team[:6].lower()
 
-    # 1. Реальные травмы из injuries таблицы (API-Football)
+
     real_injuries = []
     injury_penalty = 0.0
     try:
@@ -613,21 +543,21 @@ def n5_agent_news(team: str, match_date: str) -> dict:
         """, ("%" + search_term + "%",)).fetchall()
         c2.close()
 
-        # Убираем дубли по имени игрока
+
         seen = set()
         for player_name, injury_type, reason in rows:
             if player_name and player_name not in seen:
                 seen.add(player_name)
                 itype   = (injury_type or "").strip()
                 ireason = (reason or "").strip()
-                # Словарь перевода причин травм
+
                 INJURY_RU = {
-                    # Типы
+
                     "suspended":          "дисквалификация",
                     "missing":            "отсутствует",
                     "questionable":       "под вопросом",
                     "injured":            "травма",
-                    # Части тела и типы травм
+
                     "knee injury":        "травма колена",
                     "knee":               "травма колена",
                     "hamstring injury":   "травма бедра",
@@ -706,29 +636,29 @@ def n5_agent_news(team: str, match_date: str) -> dict:
                     if not text:
                         return "травма"
                     key = text.lower().strip()
-                    # Точное совпадение
+
                     if key in INJURY_RU:
                         return INJURY_RU[key]
-                    # Частичное совпадение (ищем подстроку)
+
                     for eng, rus in INJURY_RU.items():
                         if eng in key:
                             return rus
-                    # Если слово заканчивается на "injury" — общая травма
+
                     if key.endswith("injury") or key == "injury":
-                        # Пробуем извлечь часть тела
+
                         part = key.replace("injury", "").strip()
                         if part in INJURY_RU:
                             return INJURY_RU[part]
                         if part:
                             return "травма (" + part + ")"
                         return "травма"
-                    # Любое слово содержащее "injur"
+
                     if "injur" in key:
                         return "травма"
-                    # Карточки
+
                     if "card" in key or "ban" in key or "suspen" in key:
                         return "дисквалификация"
-                    # Если ничего не нашли — оставляем но делаем первую букву маленькой
+
                     return text[0].lower() + text[1:] if text else "травма"
 
                 if itype.lower() == "suspended" or ireason.lower() == "red card":
@@ -749,7 +679,7 @@ def n5_agent_news(team: str, match_date: str) -> dict:
     except Exception as e:
         log.debug(f"injuries DB: {e}")
 
-    # 2. Claude web search — ищем НОВОСТИ (не травмы, они уже из API)
+
     if not ANTHROPIC_API_KEY:
         result = {
             "injury_penalty": injury_penalty,
@@ -798,7 +728,7 @@ If no significant news found, return:
 
     response = _claude_search(prompt, max_tokens=500)
 
-    # Базовый результат — травмы из API + пустые новости
+
     base_result = {
         "injury_penalty": injury_penalty,
         "morale_factor":  0.0,
@@ -812,11 +742,11 @@ If no significant news found, return:
         parsed = _parse_json_from_text(response)
         if parsed and "morale_factor" in parsed:
             morale  = max(-0.10, min(0.05, float(parsed.get("morale_factor", 0))))
-            # Штраф от Claude только если нет данных API
+
             extra_penalty = float(parsed.get("injury_penalty", 0)) if not real_injuries else 0.0
             summary = (parsed.get("news_summary") or "").strip()
 
-            # Объединяем: травмы из API + новости от Claude
+
             base_result["morale_factor"]  = morale
             base_result["injury_penalty"] = injury_penalty + extra_penalty
             if summary and summary not in ("Нет данных", "нет данных", ""):
@@ -826,7 +756,7 @@ If no significant news found, return:
             log.info(f"  📰 Новости {team}: {summary[:80] if summary else 'нет новостей'} "
                      f"(настрой={morale:+.2f})")
 
-    # Сохраняем в БД
+
     try:
         import json as _j
         conn = _init_db()
@@ -847,50 +777,36 @@ If no significant news found, return:
 
 def apply_news_adjustment(base_prob: float, team_news: dict,
                            is_home: bool) -> float:
-    """
-    Применяет поправку новостей к базовой вероятности.
-    base_prob: исходная вероятность победы команды (0..1)
-    team_news: результат n5_agent_news()
-    is_home:   True если команда — хозяева
-    """
     penalty = float(team_news.get("injury_penalty", 0.0))
     morale  = float(team_news.get("morale_factor",  0.0))
 
-    # Домашнее поле немного смягчает негативный эффект
+
     if is_home:
         penalty *= 0.85
 
     adjusted = base_prob + penalty + morale
-    # Не уходим за пределы разумного
+
     return max(0.05, min(0.95, adjusted))
 
 
-# ═══════════════════════════════════════════════════════════════════════════════
-#  ГЛАВНАЯ ФУНКЦИЯ — заменяет collect_match_features из live_collector
-# ═══════════════════════════════════════════════════════════════════════════════
-
 def collect_features_with_agents(home: str, away: str, match_date: str,
                                   odds: dict, league_key: str = "soccer_epl") -> dict:
-    """
-    Собирает признаки для матча используя агентов N1–N5.
-    Каждый агент сам находит данные если их нет.
-    """
     conn = _init_db()
 
     log.info(f"  🤖 Агенты N1–N4: {home} vs {away}")
 
-    # N1 — форма обеих команд
+
     hf  = n1_agent_form(home, conn)
     af  = n1_agent_form(away, conn)
 
-    # N2 — H2H
+
     h2h = n2_agent_h2h(home, away, conn)
 
-    # N4 — контекст
+
     hc  = n4_agent_context(home, match_date, league_key, conn)
     ac  = n4_agent_context(away, match_date, league_key, conn)
 
-    # N5 новости — НЕ вызываем здесь, вызывается отдельно только для матчей 60%+
+
     hn = {}
     an = {}
 
@@ -905,7 +821,7 @@ def collect_features_with_agents(home: str, away: str, match_date: str,
             return default
 
     return {
-        # N1 — форма
+
         "home_pts_avg":       v(hf,"pts_avg"),
         "home_win_rate":      v(hf,"win_rate"),
         "home_loss_rate":     v(hf,"loss_rate"),
@@ -925,26 +841,26 @@ def collect_features_with_agents(home: str, away: str, match_date: str,
         "pts_diff":    v(hf,"pts_avg",0)       - v(af,"pts_avg",0),
         "gd_diff":     v(hf,"gd_avg",0)        - v(af,"gd_avg",0),
         "form_diff":   v(hf,"weighted_form",0) - v(af,"weighted_form",0),
-        # N2 — H2H
+
         "h2h_n":         v(h2h,"h2h_n",5),
         "h2h_home_wr":   v(h2h,"h2h_home_wr",0.4),
         "h2h_away_wr":   v(h2h,"h2h_away_wr",0.3),
         "h2h_draw_r":    v(h2h,"h2h_draw_r",0.3),
         "h2h_avg_goals": v(h2h,"h2h_avg_goals",2.6),
-        # N3 — котировки
+
         "odds_h": odds.get("odds_h", np.nan),
         "odds_d": odds.get("odds_d", np.nan),
         "odds_a": odds.get("odds_a", np.nan),
-        # N4 — контекст
+
         "home_advantage":  1,
         "home_days_rest":  v(hc,"days_rest",7),
         "away_days_rest":  v(ac,"days_rest",7),
         "home_table_pos":  v(hc,"table_position",10),
         "away_table_pos":  v(ac,"table_position",10),
-        # N5 — новости (передаём как мета для корректировки в run_bot)
+
         "_news_home": hn,
         "_news_away": an,
-        # Мета
+
         "_sources": {
             "home_form": hf.get("source","?"),
             "away_form": af.get("source","?"),
@@ -957,6 +873,5 @@ def collect_features_with_agents(home: str, away: str, match_date: str,
 
 
 def set_api_key(key: str):
-    """Устанавливает Anthropic API ключ."""
     global ANTHROPIC_API_KEY
     ANTHROPIC_API_KEY = key

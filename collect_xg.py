@@ -1,11 +1,3 @@
-"""
-collect_xg.py - Сбор xG данных с Understat.com
-Дополняет matches_raw полями home_xg, away_xg
-
-Установка:
-    pip install beautifulsoup4 lxml understatapi
-"""
-
 import json
 import re
 import time
@@ -99,8 +91,8 @@ def fetch_via_bs4(league_slug, season):
 def fetch_via_understatapi(league_slug, season):
     try:
         from understatapi import UnderstatClient
-        # Точные названия из документации understatapi:
-        # one of {EPL, La_Liga, Bundesliga, Serie_A, Ligue_1, RFPL}
+
+
         api_names = {
             "EPL":        "EPL",
             "La_liga":    "La_Liga",

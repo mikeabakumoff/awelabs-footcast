@@ -1,18 +1,3 @@
-"""
-collect_lineups_predictions.py
-Сбор составов, прогнозов API и статистики игроков для предстоящих матчей.
-
-Запускать:
-  - В составе scheduler.py каждый день в 09:00
-  - Можно запустить вручную ближе к матчу для актуальных составов
-
-Что собирает:
-  1. /fixtures?next=10       - ближайшие матчи по 5 лигам
-  2. /predictions            - прогноз API для каждого матча
-  3. /fixtures/lineups       - составы (доступны за ~1ч до матча)
-  4. /fixtures/players       - статистика игроков в последних матчах
-"""
-
 import json
 import time
 import sqlite3
@@ -39,7 +24,6 @@ LEAGUES = {
 
 CURRENT_SEASON = 2025
 
-# ── Схемы таблиц ──────────────────────────────────────────────────────────────
 
 SCHEMAS = [
     """CREATE TABLE IF NOT EXISTS match_predictions (
@@ -148,10 +132,7 @@ def api_get(endpoint, params=None):
         return None
 
 
-# ── 1. Ближайшие матчи ────────────────────────────────────────────────────────
-
 def fetch_upcoming_fixtures(league_id):
-    """Получает ближайшие 10 матчей лиги."""
     data = api_get("/fixtures", {
         "league":  league_id,
         "season":  CURRENT_SEASON,
@@ -174,10 +155,7 @@ def fetch_upcoming_fixtures(league_id):
     return fixtures
 
 
-# ── 2. Прогнозы API ───────────────────────────────────────────────────────────
-
 def fetch_prediction(conn, fixture_id, league_id, home_name, away_name, match_date):
-    """Получает прогноз API для матча."""
     data = api_get("/predictions", {"fixture": fixture_id})
     if not data or not data.get("response"):
         return
@@ -192,7 +170,7 @@ def fetch_prediction(conn, fixture_id, league_id, home_name, away_name, match_da
         uo      = pred.get("under_over", "")
         advice  = pred.get("advice", "")
 
-        # Парсим проценты "45%"
+
         def parse_pct(s):
             try:
                 return float(str(s).replace("%", "").strip()) / 100
@@ -203,7 +181,7 @@ def fetch_prediction(conn, fixture_id, league_id, home_name, away_name, match_da
         draw_p = parse_pct(pct.get("draw", "0%"))
         away_p = parse_pct(pct.get("away", "0%"))
 
-        # Победитель
+
         w_name = (winner.get("name") or "").strip()
         w_pct  = parse_pct(winner.get("percent") or "0%") if isinstance(
             winner.get("percent"), str) else home_p
@@ -229,10 +207,7 @@ def fetch_prediction(conn, fixture_id, league_id, home_name, away_name, match_da
         log.debug(f"  Прогноз ошибка: {e}")
 
 
-# ── 3. Составы ────────────────────────────────────────────────────────────────
-
 def fetch_lineups(conn, fixture_id, home_name, away_name):
-    """Получает составы обеих команд."""
     data = api_get("/fixtures/lineups", {"fixture": fixture_id})
     if not data or not data.get("response"):
         return False
@@ -287,10 +262,7 @@ def fetch_lineups(conn, fixture_id, home_name, away_name):
     return False
 
 
-# ── 4. Статистика игроков ─────────────────────────────────────────────────────
-
 def fetch_player_stats(conn, league_id, team_id, team_name):
-    """Получает статистику всех игроков команды за сезон."""
     data = api_get("/players", {
         "team":   team_id,
         "season": CURRENT_SEASON,
@@ -340,10 +312,7 @@ def fetch_player_stats(conn, league_id, team_id, team_name):
     return saved
 
 
-# ── 5. Трансферы ──────────────────────────────────────────────────────────────
-
 def fetch_transfers(conn, team_id, team_name):
-    """Получает последние трансферы команды."""
     data = api_get("/transfers", {
         "team":   team_id,
         "season": CURRENT_SEASON,
@@ -363,7 +332,7 @@ def fetch_transfers(conn, team_id, team_name):
                 from_t   = (t.get("teams") or {}).get("out", {}).get("name", "")
                 to_t     = (t.get("teams") or {}).get("in", {}).get("name", "")
 
-                # Только трансферы этого сезона (после июня 2025)
+
                 if date < "2025-06-01":
                     continue
 
@@ -382,8 +351,6 @@ def fetch_transfers(conn, team_id, team_name):
     return saved
 
 
-# ── MAIN ──────────────────────────────────────────────────────────────────────
-
 def run():
     if not API_KEY:
         log.error("API_FOOTBALL_KEY не найден в env!")
@@ -394,7 +361,7 @@ def run():
         conn.execute(schema)
     conn.commit()
 
-    # Проверяем лимит запросов
+
     status = api_get("/status")
     if status and "response" in status:
         req = status["response"].get("requests", {})
@@ -410,14 +377,14 @@ def run():
     total_players     = 0
     total_transfers   = 0
 
-    # Собираем все команды для статистики игроков
+
     processed_teams = set()
 
     for league_id, league_name in LEAGUES.items():
         log.info(f"\n{'='*45}")
         log.info(f"{league_name} (id={league_id})")
 
-        # 1. Ближайшие матчи
+
         fixtures = fetch_upcoming_fixtures(league_id)
         log.info(f"  Ближайших матчей: {len(fixtures)}")
         time.sleep(0.5)
@@ -430,18 +397,18 @@ def run():
             away_id   = fix["away_id"]
             date      = fix["date"]
 
-            # 2. Прогноз API
+
             fetch_prediction(conn, fid, league_id, home_name, away_name, date)
             total_predictions += 1
             time.sleep(0.4)
 
-            # 3. Составы (доступны за ~1ч до матча)
+
             ok = fetch_lineups(conn, fid, home_name, away_name)
             if ok:
                 total_lineups += 1
             time.sleep(0.4)
 
-            # 4. Статистика игроков команды (раз на команду)
+
             for team_id, team_name in [(home_id, home_name), (away_id, away_name)]:
                 if team_id and team_id not in processed_teams:
                     n = fetch_player_stats(conn, league_id, team_id, team_name)
@@ -451,7 +418,7 @@ def run():
                     processed_teams.add(team_id)
                     time.sleep(0.4)
 
-                    # 5. Трансферы команды
+
                     n_t = fetch_transfers(conn, team_id, team_name)
                     if n_t:
                         log.info(f"  Трансферы {team_name}: {n_t}")

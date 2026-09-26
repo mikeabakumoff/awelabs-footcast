@@ -1,11 +1,3 @@
-"""
-collect_data.py — Сборщик исторических данных
-Источник: football-data.co.uk (бесплатно, без ключей)
-Лиги: АПЛ, Ла Лига, Бундеслига, Серия А, Лига 1
-Сезоны: 2018/19 → 2025/26
-Выход: SQLite таблица matches_raw
-"""
-
 import sqlite3
 import logging
 import requests
@@ -18,7 +10,7 @@ log = logging.getLogger(__name__)
 
 DB_PATH = Path("data/epl_target_teams.db")
 
-# football-data.co.uk коды лиг и сезонов
+
 LEAGUES = {
     "E0": "АПЛ",
     "SP1": "Ла Лига",
@@ -29,7 +21,7 @@ LEAGUES = {
 
 SEASONS = ["1819","1920","2021","2122","2223","2324","2425","2526"]
 
-# Минимальный набор колонок (всегда есть во всех лигах)
+
 BASE_COLS = [
     "Div","Date","HomeTeam","AwayTeam",
     "FTHG","FTAG","FTR",
@@ -84,7 +76,7 @@ def fetch_csv(league_code: str, season: str) -> pd.DataFrame | None:
         if df.empty or "HomeTeam" not in df.columns:
             return None
 
-        # Нормализуем дату
+
         df["Date"] = pd.to_datetime(df["Date"], dayfirst=True, errors="coerce")
         df = df.dropna(subset=["Date","HomeTeam","AwayTeam","FTR"])
         df["Date"] = df["Date"].dt.strftime("%Y-%m-%d")
@@ -116,7 +108,7 @@ def insert_matches(conn: sqlite3.Connection, df: pd.DataFrame,
     saved = 0
     for _, row in df.iterrows():
         try:
-            # AS → AS_ чтобы не конфликтовать с SQL ключевым словом
+
             get = lambda col: row.get(col) if col in row.index else None
             as_val = get("AS") if "AS" in row.index else get("AS_")
 

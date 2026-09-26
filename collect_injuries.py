@@ -1,12 +1,3 @@
-"""
-collect_injuries.py - Сбор травм и дисквалификаций с API-Football
-Сохраняет в таблицу injuries в БД
-Запускать ежедневно (добавлен в scheduler.py)
-
-API: v3.football.api-sports.io
-Ключ: API_FOOTBALL_KEY в файле env
-"""
-
 import time
 import sqlite3
 import logging
@@ -22,7 +13,7 @@ log = logging.getLogger(__name__)
 
 DB_PATH = Path("data/epl_target_teams.db")
 
-# Лиги API-Football: league_id -> название
+
 LEAGUES = {
     39:  "🏴󠁧󠁢󠁥󠁮󠁧󠁿 АПЛ",
     140: "🇪🇸 Ла Лига",
@@ -31,7 +22,7 @@ LEAGUES = {
     61:  "🇫🇷 Лига 1",
 }
 
-CURRENT_SEASON = 2025  # 2025/26
+CURRENT_SEASON = 2025
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS injuries (
@@ -97,7 +88,6 @@ HEADERS = {
 
 
 def api_get(endpoint, params=None):
-    """GET запрос к API-Football."""
     if not API_KEY:
         return None
     try:
@@ -120,7 +110,6 @@ def api_get(endpoint, params=None):
 
 
 def fetch_injuries(conn, league_id, season):
-    """Скачивает травмы для лиги."""
     log.info(f"  Загружаю травмы league={league_id} season={season}...")
     data = api_get("/injuries", {"league": league_id, "season": season})
     if not data or "response" not in data:
@@ -158,7 +147,6 @@ def fetch_injuries(conn, league_id, season):
 
 
 def fetch_standings(conn, league_id, season):
-    """Скачивает таблицу лиги."""
     log.info(f"  Загружаю таблицу league={league_id} season={season}...")
     data = api_get("/standings", {"league": league_id, "season": season})
     if not data or "response" not in data:
@@ -199,15 +187,14 @@ def fetch_standings(conn, league_id, season):
 
 
 def fetch_top_scorers(conn, league_id, season):
-    """Скачивает топ бомбардиров лиги."""
     log.info(f"  Загружаю бомбардиров league={league_id}...")
     data = api_get("/players/topscorers", {"league": league_id, "season": season})
     if not data or "response" not in data:
         return 0
 
-    # Сохраняем в live_stats как JSON
+
     scorers = []
-    for item in data["response"][:10]:  # топ 10
+    for item in data["response"][:10]:
         player = item.get("player", {})
         stats  = (item.get("statistics") or [{}])[0]
         goals  = (stats.get("goals") or {})
@@ -262,15 +249,15 @@ def run():
         log.info(f"{league_name} (id={league_id})")
         log.info(f"{'='*45}")
 
-        # Травмы
+
         total_injuries += fetch_injuries(conn, league_id, CURRENT_SEASON)
         time.sleep(1)
 
-        # Таблица
+
         total_standings += fetch_standings(conn, league_id, CURRENT_SEASON)
         time.sleep(1)
 
-        # Бомбардиры
+
         total_scorers += fetch_top_scorers(conn, league_id, CURRENT_SEASON)
         time.sleep(1)
 
@@ -280,7 +267,7 @@ def run():
     log.info(f"  Позиций в таблице:  {total_standings}")
     log.info(f"  Бомбардиров:        {total_scorers}")
 
-    # Статистика запросов
+
     data = api_get("/status")
     if data and "response" in data:
         sub = data["response"].get("subscription", {})

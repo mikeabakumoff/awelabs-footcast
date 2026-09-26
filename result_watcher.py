@@ -1,8 +1,3 @@
-"""
-result_watcher.py - Запускает проверку результатов каждые 30 минут
-Запускать: python result_watcher.py (оставить работать в фоне)
-Или через Task Scheduler: запустить один раз при старте ПК
-"""
 import time
 import subprocess
 import sys
@@ -20,7 +15,7 @@ logging.basicConfig(
 log = logging.getLogger(__name__)
 
 BANGKOK = timedelta(hours=7)
-CHECK_INTERVAL = 30 * 60  # каждые 30 минут
+CHECK_INTERVAL = 30 * 60
 
 
 def bangkok_now():

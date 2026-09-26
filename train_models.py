@@ -1,9 +1,3 @@
-"""
-train_models.py — Обучение ML-ансамбля N1–N6
-Вход:  matches_features (SQLite)
-Выход: models/*.pkl
-"""
-
 import sqlite3
 import pickle
 import logging
@@ -27,7 +21,7 @@ log = logging.getLogger(__name__)
 DB_PATH    = Path("data/epl_target_teams.db")
 MODELS_DIR = Path("models")
 
-# ── Наборы признаков ──────────────────────────────────────────────────────────
+
 FEAT_N1 = [
     "home_pts_avg","home_win_rate","home_loss_rate",
     "home_gf_avg","home_ga_avg","home_gd_avg",

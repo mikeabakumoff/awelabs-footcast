@@ -1,13 +1,3 @@
-"""
-setup.py - Полная первоначальная настройка и обновление данных
-Запускать:
-  - При первом запуске
-  - Когда нужно полностью обновить все базы данных
-  - Вручную по желанию
-
-Запуск: python setup.py
-"""
-
 import sys
 import os
 import time
@@ -16,7 +6,7 @@ import subprocess
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 
-# UTF-8 для Windows консоли
+
 if sys.platform == "win32":
     os.system("chcp 65001 > nul 2>&1")
     try:
@@ -51,9 +41,9 @@ STEPS = [
 
 
 STEP_TIMEOUTS = {
-    "build_features.py": 2400,   # 40 мин — много данных
-    "collect_ucl.py":    600,    # 10 мин
-    "train_models.py":   1800,   # 30 мин
+    "build_features.py": 2400,
+    "collect_ucl.py":    600,
+    "train_models.py":   1800,
 }
 
 def run_step(script, description):

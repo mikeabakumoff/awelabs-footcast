@@ -1,14 +1,3 @@
-"""
-collect_events.py - Сбор событий матчей (голы, минуты) с API-Football
-Сохраняет в таблицу goal_events в БД
-Запускается в составе setup.py и scheduler.py
-
-Собирает для каждой лиги:
-- ID всех сыгранных матчей сезона
-- Для каждого матча: голы (игрок, минута, команда)
-- Считает среднюю минуту первого гола каждого игрока
-"""
-
 import time
 import sqlite3
 import logging
@@ -106,11 +95,10 @@ def api_get(endpoint, params=None):
 
 
 def get_fixture_ids(league_id, season):
-    """Получает ID всех сыгранных матчей лиги за сезон."""
     data = api_get("/fixtures", {
         "league": league_id,
         "season": season,
-        "status": "FT",  # только завершённые
+        "status": "FT",
     })
     if not data or "response" not in data:
         return []
@@ -120,7 +108,6 @@ def get_fixture_ids(league_id, season):
 
 
 def get_fixture_events(fixture_id):
-    """Получает события (голы) конкретного матча."""
     data = api_get("/fixtures/events", {
         "fixture": fixture_id,
         "type": "Goal",
@@ -131,7 +118,6 @@ def get_fixture_events(fixture_id):
 
 
 def save_events(conn, fixture_id, league_id, season, events):
-    """Сохраняет голы матча в БД."""
     now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     saved = 0
     for ev in events:
@@ -141,9 +127,9 @@ def save_events(conn, fixture_id, league_id, season, events):
             time_    = ev.get("time") or {}
             minute   = time_.get("elapsed") or 0
             extra    = time_.get("extra") or 0
-            detail   = ev.get("detail", "")  # Normal Goal, Penalty, Own Goal
+            detail   = ev.get("detail", "")
 
-            # Пропускаем автоголы
+
             if "own" in detail.lower():
                 continue
 
@@ -162,16 +148,9 @@ def save_events(conn, fixture_id, league_id, season, events):
 
 
 def compute_scorer_stats(conn, league_id, season):
-    """
-    Считает статистику по каждому игроку:
-    - total_goals: всего голов
-    - avg_minute: средняя минута гола
-    - first_goal_rate: как часто он забивает первым в матче
-    - games_scored: в скольких матчах забил
-    """
     now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
-    # Получаем все голы лиги за сезон
+
     rows = conn.execute("""
         SELECT fixture_id, team_name, player_name, minute, extra_time
         FROM goal_events
@@ -182,15 +161,15 @@ def compute_scorer_stats(conn, league_id, season):
     if not rows:
         return
 
-    # Группируем по матчам — для каждого матча находим первый гол
+
     from collections import defaultdict
     fixtures = defaultdict(list)
     for fix_id, team, player, minute, extra in rows:
         fixtures[fix_id].append((minute + (extra or 0), player, team))
 
-    # Считаем статистику по игрокам
-    player_goals   = defaultdict(list)    # player -> [minutes]
-    player_firsts  = defaultdict(int)     # player -> кол-во первых голов в матче
+
+    player_goals   = defaultdict(list)
+    player_firsts  = defaultdict(int)
     player_team    = {}
 
     for fix_id, goal_list in fixtures.items():
@@ -203,12 +182,12 @@ def compute_scorer_stats(conn, league_id, season):
             if player == first_player:
                 player_firsts[player] += 1
 
-    # Сохраняем в scorer_stats
+
     saved = 0
     for player, minutes in player_goals.items():
         total = len(minutes)
         avg_min = round(sum(minutes) / total, 1)
-        games = total  # упрощённо: 1 гол = 1 матч
+        games = total
         firsts = player_firsts.get(player, 0)
         first_rate = round(firsts / total, 3) if total > 0 else 0.0
         team = player_team.get(player, "")
@@ -236,7 +215,7 @@ def run():
     conn.execute(SCHEMA_SCORER_STATS)
     conn.commit()
 
-    # Проверяем сколько запросов осталось
+
     status = api_get("/status")
     if status and "response" in status:
         req = status["response"].get("requests", {})
@@ -254,7 +233,7 @@ def run():
         log.info(f"\n{'='*45}")
         log.info(f"{league_name} (id={league_id})")
 
-        # Получаем ID матчей которых ещё нет в БД
+
         already = set(
             r[0] for r in conn.execute(
                 "SELECT DISTINCT fixture_id FROM goal_events WHERE league_id=? AND season=?",
@@ -271,7 +250,7 @@ def run():
             compute_scorer_stats(conn, league_id, CURRENT_SEASON)
             continue
 
-        # Загружаем батчами по 20 матчей (API лимит)
+
         batch_size = 20
         league_events = 0
 
@@ -282,7 +261,7 @@ def run():
                 n = save_events(conn, fixture_id, league_id, CURRENT_SEASON, events)
                 league_events += n
                 total_fixtures += 1
-                time.sleep(0.3)  # не превышаем rate limit
+                time.sleep(0.3)
 
             conn.commit()
             log.info(f"  Обработано матчей: {min(i+batch_size, len(new_ids))}/{len(new_ids)}")
@@ -291,7 +270,7 @@ def run():
         log.info(f"  Голов сохранено: {league_events}")
         total_events += league_events
 
-        # Пересчитываем статистику бомбардиров
+
         compute_scorer_stats(conn, league_id, CURRENT_SEASON)
         time.sleep(2)
 
@@ -300,7 +279,7 @@ def run():
     log.info(f"  Матчей обработано: {total_fixtures}")
     log.info(f"  Голов сохранено:   {total_events}")
 
-    # Проверяем итог
+
     total_in_db = conn.execute("SELECT COUNT(*) FROM goal_events").fetchone()[0]
     scorers_in_db = conn.execute("SELECT COUNT(*) FROM scorer_stats").fetchone()[0]
     log.info(f"  Голов в БД всего:  {total_in_db}")

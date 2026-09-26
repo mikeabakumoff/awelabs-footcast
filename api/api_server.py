@@ -1,9 +1,3 @@
-"""
-api_server.py — Flask API для Telegram Web App
-Запуск: python api_server.py
-Порт: 5000
-"""
-
 import json
 import sqlite3
 import logging
@@ -53,12 +47,11 @@ def get_db():
 
 @app.route("/api/matches")
 def get_matches():
-    """Возвращает матчи за текущий и следующий месяц."""
     now = datetime.now(timezone.utc) + BANGKOK
     month_param = request.args.get("month", "current")
 
     if month_param == "next":
-        # Следующий месяц
+
         if now.month == 12:
             year, month = now.year + 1, 1
         else:
@@ -66,7 +59,7 @@ def get_matches():
     else:
         year, month = now.year, now.month
 
-    # Первый и последний день месяца
+
     first_day = f"{year}-{month:02d}-01"
     if month == 12:
         last_day = f"{year + 1}-01-01"
@@ -75,8 +68,7 @@ def get_matches():
 
     conn = get_db()
 
-    # Берём предстоящие матчи из sent_messages (прогнозы уже готовы)
-    # Расширяем диапазон — берём прогнозы за ±7 дней от месяца
+
     from datetime import datetime as _dt, timedelta as _td
     ext_first = (_dt.strptime(first_day, "%Y-%m-%d") - _td(days=7)).strftime("%Y-%m-%d")
     ext_last  = (_dt.strptime(last_day,  "%Y-%m-%d") + _td(days=7)).strftime("%Y-%m-%d")
@@ -96,8 +88,7 @@ def get_matches():
     if sent_rows:
         log.info(f"Первые: {[(r['home_team'], r['away_team'], r['match_date']) for r in sent_rows[:3]]}")
 
-    # Берём все матчи из upcoming_matches (включая те без прогноза)
-    # Проверяем колонки таблицы
+
     cols = [r[1] for r in conn.execute("PRAGMA table_info(upcoming_matches)").fetchall()]
     date_col = "date" if "date" in cols else "match_date" if "match_date" in cols else cols[0]
     time_col = "time_utc" if "time_utc" in cols else "match_time" if "match_time" in cols else None
@@ -113,7 +104,7 @@ def get_matches():
         ORDER BY {date_col} ASC
     """, (first_day, last_day)).fetchall()
 
-    # Травмы для команд
+
     injury_cache = {}
 
     def get_injuries(team):
@@ -153,28 +144,28 @@ def get_matches():
         injury_cache[team] = result
         return result
 
-    # Строим индекс прогнозов — по полному ключу И по нормализованному (первые 5 букв)
+
     pred_index = {}
-    pred_index_norm = {}  # нормализованный ключ для нечёткого поиска
+    pred_index_norm = {}
     for row in sent_rows:
         key = f"{row['home_team']}|{row['away_team']}|{row['match_date']}"
         pred_index[key] = dict(row)
-        # Нормализованный ключ
+
         norm = f"{row['home_team'][:5].lower()}|{row['away_team'][:5].lower()}|{row['match_date']}"
         pred_index_norm[norm] = dict(row)
 
-    # Debug: log prediction keys
+
     log.info(f"Прогнозов в индексе: {len(pred_index)}, примеры: {list(pred_index.keys())[:3]}")
 
-    # Строим итоговый список матчей
+
     matches_by_date = {}
 
-    # Добавляем все upcoming матчи
+
     for row in upcoming_rows:
         date_str = row["date"]
         league_key = row["league_key"] or "soccer_epl"
 
-        # Время Bangkok
+
         time_bkk = "—"
         if row["time_utc"]:
             try:
@@ -187,13 +178,13 @@ def get_matches():
         key = f"{row['home_team']}|{row['away_team']}|{date_str}"
         pred = pred_index.get(key)
         if not pred:
-            # Пробуем нормализованный поиск (5 букв)
+
             norm = f"{row['home_team'][:5].lower()}|{row['away_team'][:5].lower()}|{date_str}"
             pred = pred_index_norm.get(norm)
         if not pred:
-            # Пробуем 4 буквы
+
             norm4 = f"{row['home_team'][:4].lower()}|{row['away_team'][:4].lower()}|{date_str}"
-            # Ищем в pred_index_norm по 4 буквам
+
             for k, v in pred_index_norm.items():
                 parts = k.split("|")
                 if (len(parts) == 3 and parts[2] == date_str and
@@ -232,12 +223,12 @@ def get_matches():
             match["fg_team"] = pred["fg_team"]
             match["fg_minute"] = pred["fg_minute"]
 
-            # Полная аналитика только при 65%+
+
             if prob >= 65:
                 match["injuries_home"] = get_injuries(row["home_team"])
                 match["injuries_away"] = get_injuries(row["away_team"])
 
-            # Реальный результат если матч уже сыгран
+
             if pred["real_score_h"] is not None:
                 match["result"] = {
                     "score_h": pred["real_score_h"],
@@ -249,9 +240,9 @@ def get_matches():
             matches_by_date[date_str] = []
         matches_by_date[date_str].append(match)
 
-    # Дедупликация — убираем дубли (Leeds/Leeds United, Ein Frankfurt/Eintracht Frankfurt)
+
     for date_str, matches in matches_by_date.items():
-        seen = {}  # norm_key -> index in deduped
+        seen = {}
         deduped = []
         for m in matches:
             norm_key = (m["home"][:4].lower().strip(), m["away"][:4].lower().strip())
@@ -259,13 +250,13 @@ def get_matches():
                 seen[norm_key] = len(deduped)
                 deduped.append(m)
             else:
-                # Если новая запись имеет прогноз а старая нет — заменяем
+
                 existing_idx = seen[norm_key]
                 if m["prob"] is not None and deduped[existing_idx]["prob"] is None:
                     deduped[existing_idx] = m
         matches_by_date[date_str] = deduped
 
-    # Также добавляем матчи из sent_messages которых нет в upcoming
+
     for key, pred in pred_index.items():
         date_str = pred["match_date"]
         existing_keys = [
@@ -301,7 +292,7 @@ def get_matches():
                 matches_by_date[date_str] = []
             matches_by_date[date_str].append(match)
 
-    # Сортируем матчи внутри дня по лиге и времени
+
     def sort_key(m):
         league_order = LEAGUE_ORDER.index(m["league_key"]) if m["league_key"] in LEAGUE_ORDER else 99
         return (league_order, m["time"])
@@ -326,7 +317,6 @@ def get_matches():
 
 @app.route("/api/stats")
 def get_stats():
-    """Статистика точности прогнозов."""
     conn = get_db()
     total = conn.execute("SELECT COUNT(*) FROM sent_messages WHERE result_checked=1").fetchone()[0]
     correct = conn.execute("SELECT COUNT(*) FROM sent_messages WHERE prediction_ok=1").fetchone()[0]

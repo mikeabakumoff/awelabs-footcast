@@ -1,12 +1,3 @@
-"""
-collect_ucl.py — Сбор исторических данных ЛЧ/ЛЕ + UEFA коэффициенты
-Источники:
-  1. API-Football — результаты ЛЧ и ЛЕ за сезоны 2018-2025
-  2. UEFA club coefficients — встроенный словарь топ клубов
-
-Запуск: python collect_ucl.py
-"""
-
 import sqlite3
 import logging
 import requests
@@ -20,7 +11,7 @@ log = logging.getLogger(__name__)
 
 DB_PATH = Path("data/epl_target_teams.db")
 
-# Читаем API ключ из env файла
+
 def load_env():
     env = {}
     try:
@@ -37,18 +28,16 @@ def load_env():
 ENV = load_env()
 API_KEY = ENV.get("API_FOOTBALL_KEY", "")
 
-# ── Liga IDs в API-Football ────────────────────────────────────────────────────
-UCL_LEAGUE_ID = 2    # UEFA Champions League
-UEL_LEAGUE_ID = 3    # UEFA Europa League
-UECL_LEAGUE_ID = 848 # UEFA Conference League
 
-UCL_SEASONS = [2018, 2019, 2020, 2021, 2022, 2023, 2024]  # 2018 = сезон 2018/19
+UCL_LEAGUE_ID = 2
+UEL_LEAGUE_ID = 3
+UECL_LEAGUE_ID = 848
 
-# ── UEFA Club Coefficients (2024/25) ──────────────────────────────────────────
-# Источник: UEFA.com / официальные рейтинги
-# Обновляются ежегодно — здесь актуальные значения
+UCL_SEASONS = [2018, 2019, 2020, 2021, 2022, 2023, 2024]
+
+
 UEFA_COEFFICIENTS = {
-    # Топ клубы по коэффициенту
+
     "Real Madrid":       150.0,
     "Manchester City":   138.0,
     "Bayern Munich":     132.0,
@@ -109,27 +98,25 @@ UEFA_COEFFICIENTS = {
     "Red Bull Salzburg": 50.0,
 }
 
-DEFAULT_COEFF = 30.0  # Для команд не в списке
+DEFAULT_COEFF = 30.0
 
 
 def get_ucl_coeff(team_name: str) -> float:
-    """Возвращает UEFA коэффициент команды."""
-    # Прямое совпадение
+
     if team_name in UEFA_COEFFICIENTS:
         return UEFA_COEFFICIENTS[team_name]
-    # Нечёткий поиск
+
     team_lower = team_name.lower()
     for known, coeff in UEFA_COEFFICIENTS.items():
         if known.lower() in team_lower or team_lower in known.lower():
             return coeff
-        # По первым 5 буквам
+
         if known.lower()[:5] == team_lower[:5]:
             return coeff
     return DEFAULT_COEFF
 
 
 def fetch_ucl_season(league_id: int, season: int, conn: sqlite3.Connection) -> int:
-    """Скачивает все матчи лиги за сезон через API-Football."""
     if not API_KEY:
         log.error("API_FOOTBALL_KEY не задан в env файле")
         return 0
@@ -139,7 +126,7 @@ def fetch_ucl_season(league_id: int, season: int, conn: sqlite3.Connection) -> i
     params = {
         "league": league_id,
         "season": season,
-        "status": "FT",  # только завершённые
+        "status": "FT",
     }
 
     league_names = {2: "ЛЧ", 3: "ЛЕ", 848: "ЛК"}
@@ -169,14 +156,14 @@ def fetch_ucl_season(league_id: int, season: int, conn: sqlite3.Connection) -> i
 
             home = teams["home"]["name"]
             away = teams["away"]["name"]
-            date_str = f["date"][:10]  # YYYY-MM-DD
+            date_str = f["date"][:10]
             fthg = goals.get("home")
             ftag = goals.get("away")
 
             if fthg is None or ftag is None:
                 continue
 
-            # Результат
+
             if fthg > ftag:
                 ftr = "H"
             elif fthg < ftag:
@@ -184,7 +171,7 @@ def fetch_ucl_season(league_id: int, season: int, conn: sqlite3.Connection) -> i
             else:
                 ftr = "D"
 
-            # Полтайм
+
             ht = score.get("halftime", {})
             hthg = ht.get("home")
             htag = ht.get("away")
@@ -192,10 +179,10 @@ def fetch_ucl_season(league_id: int, season: int, conn: sqlite3.Connection) -> i
             if hthg is not None and htag is not None:
                 htr = "H" if hthg > htag else ("A" if hthg < htag else "D")
 
-            # Сезон как строка
+
             season_str = f"{season}-{str(season+1)[-2:]}"
 
-            # UEFA коэффициенты
+
             home_coeff = get_ucl_coeff(home)
             away_coeff = get_ucl_coeff(away)
 
@@ -211,7 +198,7 @@ def fetch_ucl_season(league_id: int, season: int, conn: sqlite3.Connection) -> i
                 int(hthg) if hthg is not None else None,
                 int(htag) if htag is not None else None,
                 htr,
-                None, None,  # xG для еврокубков не собираем
+                None, None,
             ))
             saved += conn.execute("SELECT changes()").fetchone()[0]
         except Exception as e:
@@ -223,7 +210,6 @@ def fetch_ucl_season(league_id: int, season: int, conn: sqlite3.Connection) -> i
 
 
 def add_uefa_coefficients_table(conn: sqlite3.Connection):
-    """Создаём таблицу UEFA коэффициентов и заполняем её."""
     conn.execute("""
         CREATE TABLE IF NOT EXISTS uefa_coefficients (
             team_name   TEXT PRIMARY KEY,
@@ -245,7 +231,6 @@ def add_uefa_coefficients_table(conn: sqlite3.Connection):
 
 
 def add_coeff_to_features(conn: sqlite3.Connection):
-    """Добавляем колонки UEFA коэффициентов в matches_features если нет."""
     cols = [r[1] for r in conn.execute("PRAGMA table_info(matches_features)").fetchall()]
     for col in ["home_uefa_coeff", "away_uefa_coeff", "coeff_diff"]:
         if col not in cols:
@@ -257,23 +242,23 @@ def add_coeff_to_features(conn: sqlite3.Connection):
 def main():
     conn = sqlite3.connect(DB_PATH)
 
-    # 1. Создаём таблицу коэффициентов и заполняем
+
     log.info("═══ Шаг 1: UEFA коэффициенты ═══")
     add_uefa_coefficients_table(conn)
 
-    # 2. Добавляем колонки в matches_features
+
     log.info("═══ Шаг 2: Обновляем схему matches_features ═══")
     add_coeff_to_features(conn)
 
-    # 3. Скачиваем исторические данные ЛЧ
+
     log.info("═══ Шаг 3: Исторические данные ЛЧ ═══")
     total = 0
     for season in UCL_SEASONS:
         n = fetch_ucl_season(UCL_LEAGUE_ID, season, conn)
         total += n
-        time.sleep(1.5)  # Пауза чтобы не превысить лимит API
+        time.sleep(1.5)
 
-    # 4. Скачиваем исторические данные ЛЕ
+
     log.info("═══ Шаг 4: Исторические данные ЛЕ ═══")
     for season in UCL_SEASONS:
         n = fetch_ucl_season(UEL_LEAGUE_ID, season, conn)
@@ -282,7 +267,7 @@ def main():
 
     log.info(f"Итого новых матчей ЛЧ+ЛЕ: {total}")
 
-    # 5. Обновляем UEFA коэффициенты в matches_features
+
     log.info("═══ Шаг 5: Обновляем UEFA коэффициенты в признаках ═══")
     rows = conn.execute(
         "SELECT id, home_team, away_team FROM matches_features"

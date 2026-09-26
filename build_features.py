@@ -1,12 +1,3 @@
-"""
-build_features.py — Feature engineering без утечки данных
-Вход:  matches_raw (SQLite)
-Выход: matches_features — ~26 000 строк, ~35 признаков
-
-Принцип: каждый матч видит ТОЛЬКО данные, известные ДО его начала.
-Признаки считаются по скользящему окну из предыдущих матчей команды.
-"""
-
 import sqlite3
 import logging
 import numpy as np
@@ -17,9 +8,9 @@ logging.basicConfig(format="%(asctime)s  %(levelname)s  %(message)s", level=logg
 log = logging.getLogger(__name__)
 
 DB_PATH = Path("data/epl_target_teams.db")
-WINDOW  = 6   # последние N матчей для расчёта формы
+WINDOW  = 6
 
-# UEFA коэффициенты встроены для быстрого доступа
+
 UEFA_COEFFICIENTS = {
     "Real Madrid": 150.0, "Man City": 138.0, "Bayern Munich": 138.0,
     "Barcelona": 124.0, "Paris SG": 118.0, "Liverpool": 116.0,
@@ -151,10 +142,6 @@ def load_raw(conn: sqlite3.Connection) -> pd.DataFrame:
 
 
 def team_form(team_matches: pd.DataFrame, before_idx: int, window: int) -> dict:
-    """
-    Считает форму команды по последним window матчам ДО индекса before_idx.
-    team_matches — все матчи команды, отсортированные по дате.
-    """
     past = team_matches[team_matches.index < before_idx].tail(window)
     n = len(past)
 
@@ -201,13 +188,12 @@ def team_form(team_matches: pd.DataFrame, before_idx: int, window: int) -> dict:
 
 
 def h2h_stats(df: pd.DataFrame, home: str, away: str, before_date) -> dict:
-    """H2H статистика между двумя командами до before_date."""
     mask = (
         ((df["home_team"] == home) & (df["away_team"] == away)) |
         ((df["home_team"] == away) & (df["away_team"] == home))
     ) & (df["date"] < before_date)
 
-    h2h = df[mask].tail(15)  # последние 15 встреч
+    h2h = df[mask].tail(15)
     n = len(h2h)
     if n == 0:
         return {"h2h_n": 0, "h2h_home_wr": np.nan, "h2h_away_wr": np.nan,
@@ -233,7 +219,6 @@ def h2h_stats(df: pd.DataFrame, home: str, away: str, before_date) -> dict:
 
 
 def avg_odds(row: pd.Series) -> tuple:
-    """Средние котировки из нескольких букмекеров."""
     oh_vals = [row.get(c) for c in ["b365h","bwh","iwh"] if pd.notna(row.get(c))]
     od_vals = [row.get(c) for c in ["b365d","bwd","iwd"] if pd.notna(row.get(c))]
     oa_vals = [row.get(c) for c in ["b365a","bwa","iwa"] if pd.notna(row.get(c))]
@@ -244,15 +229,15 @@ def avg_odds(row: pd.Series) -> tuple:
         raw = [1/o for o in odds_list if o and o > 1]
         if not raw:
             return np.nan
-        total = sum(raw) + 0.001  # убираем маржу приближённо
+        total = sum(raw) + 0.001
         return round(np.mean(raw) / (total / len(raw)), 4)
 
-    # Возвращаем вероятности без маржи
+
     oh_p = prob(oh_vals) if oh_vals else np.nan
     od_p = prob(od_vals) if od_vals else np.nan
     oa_p = prob(oa_vals) if oa_vals else np.nan
 
-    # Нормализуем чтобы сумма = 1
+
     total = sum(x for x in [oh_p, od_p, oa_p] if not np.isnan(x))
     if total > 0:
         oh_p = round(oh_p / total, 4) if not np.isnan(oh_p) else np.nan
@@ -263,10 +248,6 @@ def avg_odds(row: pd.Series) -> tuple:
 
 
 def build_team_index(df: pd.DataFrame) -> dict:
-    """
-    Строит индекс: team → DataFrame со всеми матчами команды
-    с флагом is_home и оригинальными индексами.
-    """
     teams = set(df["home_team"]) | set(df["away_team"])
     index = {}
     for team in teams:
@@ -280,7 +261,6 @@ def build_team_index(df: pd.DataFrame) -> dict:
 
 
 def build_features(conn: sqlite3.Connection, df: pd.DataFrame) -> int:
-    """Строит признаки для каждого матча без утечки данных."""
     team_idx = build_team_index(df)
     saved = 0
 
@@ -292,21 +272,21 @@ def build_features(conn: sqlite3.Connection, df: pd.DataFrame) -> int:
         away = row["away_team"]
         date = row["date"]
 
-        # Форма хозяев — только матчи ДО текущего
+
         home_matches = team_idx.get(home, pd.DataFrame())
         home_f = team_form(home_matches, idx, WINDOW)
 
-        # Форма гостей
+
         away_matches = team_idx.get(away, pd.DataFrame())
         away_f = team_form(away_matches, idx, WINDOW)
 
-        # H2H
+
         h2h = h2h_stats(df, home, away, date)
 
-        # Котировки
+
         oh_p, od_p, oa_p = avg_odds(row)
 
-        # xG — средние за последние WINDOW матчей
+
         def xg_avg(team_matches, before_idx, is_home_col):
             past = team_matches[team_matches.index < before_idx].tail(WINDOW)
             xg_vals = []
@@ -324,14 +304,13 @@ def build_features(conn: sqlite3.Connection, df: pd.DataFrame) -> int:
             else np.nan
         )
 
-        # ── UEFA коэффициенты ─────────────────────────────────────────────────
+
         home_coeff = get_uefa_coeff(home)
         away_coeff = get_uefa_coeff(away)
         coeff_diff = round(home_coeff - away_coeff, 1)
 
-        # ── Мотивация: позиция, давление, отдых ──────────────────────────────
+
         def season_standing(team_matches, before_idx):
-            """Считает позицию и очки команды в текущем сезоне до этого матча."""
             past = team_matches[team_matches.index < before_idx]
             if len(past) == 0:
                 return None, None
@@ -344,30 +323,27 @@ def build_features(conn: sqlite3.Connection, df: pd.DataFrame) -> int:
         home_pts_total, home_gp = season_standing(home_matches, idx)
         away_pts_total, away_gp = season_standing(away_matches, idx)
 
-        # Среднее очков на матч для оценки положения
+
         home_pts_pm = (home_pts_total / home_gp) if home_gp and home_gp > 0 else 1.5
         away_pts_pm = (away_pts_total / away_gp) if away_gp and away_gp > 0 else 1.5
 
-        # Примерная позиция: чем меньше очков/матч — тем ниже (20 команд)
-        # Нормализуем: 0=лидер, 19=последний
-        # Используем относительную оценку
+
         home_position = max(1, min(20, int(round(20 - home_pts_pm * 5.5))))
         away_position = max(1, min(20, int(round(20 - away_pts_pm * 5.5))))
 
-        # Давление вылета: команды в нижней части (позиция 16-20) играют под огромным давлением
-        # Это УСИЛИВАЕТ их мотивацию (команды борющиеся за выживание часто переигрывают фаворитов)
-        home_relegation_gap = 17 - home_position  # отрицательное = в зоне вылета
+
+        home_relegation_gap = 17 - home_position
         away_relegation_gap = 17 - away_position
 
-        # Борьба за чемпионство (позиции 1-4)
-        home_title_gap = home_position - 1   # 0 = лидер
+
+        home_title_gap = home_position - 1
         away_title_gap = away_position - 1
 
-        # Дни отдыха
+
         def rest_days(team_matches, before_idx, current_date):
             past = team_matches[team_matches.index < before_idx]
             if len(past) == 0:
-                return 7  # нет данных — нейтрально
+                return 7
             last_date = past.iloc[-1]["date"] if hasattr(past.iloc[-1]["date"], "days") else pd.to_datetime(past.iloc[-1]["date"])
             try:
                 diff = (current_date - pd.to_datetime(last_date)).days
@@ -378,7 +354,7 @@ def build_features(conn: sqlite3.Connection, df: pd.DataFrame) -> int:
         home_rest = rest_days(home_matches, idx, date)
         away_rest = rest_days(away_matches, idx, date)
 
-        # Процент побед дома/в гостях отдельно
+
         def home_win_rate_calc(team_matches, before_idx):
             past = team_matches[(team_matches.index < before_idx) & (team_matches["is_home"] == True)].tail(10)
             if len(past) == 0: return 0.4
@@ -421,27 +397,27 @@ def build_features(conn: sqlite3.Connection, df: pd.DataFrame) -> int:
                 row["league"], row["season"],
                 date.strftime("%Y-%m-%d"), home, away,
                 row["ftr"], int(row["fthg"]), int(row["ftag"]),
-                # хозяева
+
                 home_f["pts_avg"], home_f["win_rate"], home_f["draw_rate"], home_f["loss_rate"],
                 home_f["gf_avg"], home_f["ga_avg"], home_f["gd_avg"], home_f["sot_avg"],
                 home_f["weighted_form"], home_f["games_played"],
-                # гости
+
                 away_f["pts_avg"], away_f["win_rate"], away_f["draw_rate"], away_f["loss_rate"],
                 away_f["gf_avg"], away_f["ga_avg"], away_f["gd_avg"], away_f["sot_avg"],
                 away_f["weighted_form"], away_f["games_played"],
-                # разница
+
                 (home_f["pts_avg"] or 0) - (away_f["pts_avg"] or 0),
                 (home_f["gd_avg"]  or 0) - (away_f["gd_avg"]  or 0),
                 (home_f["weighted_form"] or 0) - (away_f["weighted_form"] or 0),
-                # H2H
+
                 h2h["h2h_n"], h2h["h2h_home_wr"], h2h["h2h_away_wr"],
                 h2h["h2h_draw_r"], h2h["h2h_avg_goals"],
-                # котировки
+
                 oh_p, od_p, oa_p,
-                1,  # home_advantage
-                # xG
+                1,
+
                 home_xg_a, away_xg_a, xg_diff,
-                # мотивация
+
                 home_position, away_position,
                 home_pts_total, away_pts_total,
                 home_relegation_gap, away_relegation_gap,
@@ -509,14 +485,14 @@ def run():
             pass
     conn.commit()
 
-    # Проверяем есть ли matches_raw
+
     count = conn.execute("SELECT COUNT(*) FROM matches_raw").fetchone()[0]
     if count == 0:
         log.error("Таблица matches_raw пуста! Сначала запустите: python collect_data.py")
         conn.close()
         return
 
-    # Инкрементальное обновление — только новые матчи
+
     last_feat = conn.execute(
         "SELECT MAX(date) FROM matches_features"
     ).fetchone()[0]

@@ -1,8 +1,3 @@
-"""
-run_bot.py — Sports Analytics Bot
-Версия 2.0: все крупные лиги, дообучение, эмодзи в логах
-"""
-
 import re
 import json
 import sqlite3
@@ -15,7 +10,7 @@ from math import exp, factorial
 from pathlib import Path
 from datetime import datetime, timezone, timedelta
 
-# ── Эмодзи-логгер ─────────────────────────────────────────────────────────────
+
 class EmojiFormatter(logging.Formatter):
     ICONS = {
         logging.DEBUG:   "🔹",
@@ -34,9 +29,8 @@ handler.setFormatter(EmojiFormatter("%(asctime)s  %(message)s"))
 logging.basicConfig(level=logging.INFO, handlers=[handler])
 log = logging.getLogger(__name__)
 
-# ── Конфигурация — читаем из файла env ────────────────────────────────────────
+
 def _load_env(path="env") -> dict:
-    """Читает файл env формата KEY=VALUE (по одному на строку)."""
     env = {}
     try:
         with open(path, encoding="utf-8") as f:
@@ -54,8 +48,8 @@ def _load_env(path="env") -> dict:
 _env = _load_env()
 
 TELEGRAM_TOKEN    = _env.get("TELEGRAM_TOKEN",    "")
-CHAT_ID           = _env.get("CHAT_ID",           "")  # канал
-OWNER_CHAT_ID     = _env.get("OWNER_CHAT_ID", "")  # личный ID для служебных уведомлений
+CHAT_ID           = _env.get("CHAT_ID",           "")
+OWNER_CHAT_ID     = _env.get("OWNER_CHAT_ID", "")
 ODDS_API_KEY      = _env.get("ODDS_API_KEY",      "")
 WEB_APP_URL     = _env.get("WEB_APP_URL", "")
 ANTHROPIC_API_KEY = _env.get("ANTHROPIC_API_KEY", "")
@@ -66,51 +60,49 @@ MODELS_DIR = Path("models")
 MIN_SEND_PROB = 0.60
 CONFIDENCE_THR = {"high": 0.65, "medium": 0.60}
 
-# ── Все крупные лиги для the-odds-api ─────────────────────────────────────────
+
 LEAGUES_API = {
-    # Еврокубки
+
     "soccer_uefa_champs_league":   "🏆 Лига Чемпионов",
     "soccer_uefa_europa_league":   "🥈 Лига Европы",
     "soccer_uefa_europa_conference_league": "🥉 Лига Конференций",
-    # Топ лиги
+
     "soccer_epl":              "🏴󠁧󠁢󠁥󠁮󠁧󠁿 АПЛ",
     "soccer_spain_la_liga":    "🇪🇸 Ла Лига",
     "soccer_italy_serie_a":    "🇮🇹 Серия А",
     "soccer_france_ligue_one": "🇫🇷 Лига 1",
 }
 
-# Топ команды — показываем прогнозы только для них в клубных лигах
-# В ЛЧ/ЛЕ — все матчи интересны
+
 TOP_CLUBS = {
-    # АПЛ
+
     "Man City", "Liverpool", "Arsenal", "Chelsea", "Man United",
     "Tottenham", "Newcastle", "Aston Villa",
-    # Ла Лига
+
     "Real Madrid", "Barcelona",
-    # Серия А
+
     "Inter", "Juventus", "Milan", "Roma",
-    # Лига 1
+
     "Paris SG", "Marseille", "Monaco",
-    # Бундеслига
+
     "Bayern Munich", "Dortmund", "Leverkusen", "RB Leipzig", "Ein Frankfurt",
     "Eintracht Frankfurt",
-    # Серия А
+
     "Inter", "Napoli", "Juventus", "Milan", "Roma", "Lazio", "Atalanta",
-    # Лига 1
+
     "Paris SG", "Marseille", "Monaco", "Lyon", "Lille",
 }
 
 
-# Лиги где показываем ВСЕ матчи (еврокубки)
 SHOW_ALL_LEAGUES = {
     "soccer_uefa_champs_league",
     "soccer_uefa_europa_league",
     "soccer_uefa_europa_conference_league",
 }
 
-# Нормализация имён команд из API → имена в matches_features
+
 TEAM_NORM = {
-    # АПЛ
+
     "Manchester City":              "Man City",
     "Manchester United":            "Man United",
     "Brentford FC":                 "Brentford",
@@ -140,7 +132,7 @@ TEAM_NORM = {
     "Watford FC":                   "Watford",
     "Luton Town":                   "Luton",
     "Southampton FC":               "Southampton",
-    # Ла Лига
+
     "Atletico Madrid":              "Ath Madrid",
     "Atlético Madrid":              "Ath Madrid",
     "Athletic Bilbao":              "Ath Bilbao",
@@ -161,7 +153,7 @@ TEAM_NORM = {
     "Cadiz CF":                     "Cadiz",
     "Granada CF":                   "Granada",
     "Leganes":                      "Leganes",
-    # Бундеслига
+
     "Borussia Dortmund":            "Dortmund",
     "Borussia Monchengladbach":     "M'gladbach",
     "Bayer Leverkusen":             "Leverkusen",
@@ -190,7 +182,7 @@ TEAM_NORM = {
     "Holstein Kiel":                "Holstein Kiel",
     "Darmstadt 98":                 "Darmstadt",
     "VfL Bochum":                   "Bochum",
-    # Серия А
+
     "AC Milan":                     "Milan",
     "Inter Milan":                  "Inter",
     "AS Roma":                      "Roma",
@@ -219,7 +211,7 @@ TEAM_NORM = {
     "Chievo":                       "Chievo",
     "SPAL":                         "Spal",
     "Crotone":                      "Crotone",
-    # Лига 1
+
     "Paris Saint-Germain":          "Paris SG",
     "Paris Saint Germain":          "Paris SG",
     "PSG":                          "Paris SG",
@@ -253,7 +245,7 @@ TEAM_NORM = {
     "Amiens SC":                    "Amiens",
 }
 
-# Схема БД
+
 ODDS_SCHEMA = """
 CREATE TABLE IF NOT EXISTS live_odds (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -276,10 +268,6 @@ CREATE TABLE IF NOT EXISTS upcoming_matches (
 """
 
 
-# ═══════════════════════════════════════════════════════════════════════════════
-#  1. МАТЧИ НА БЛИЖАЙШИЕ 2 НЕДЕЛИ + КОТИРОВКИ
-# ═══════════════════════════════════════════════════════════════════════════════
-
 def norm(name: str) -> str:
     return TEAM_NORM.get(name, name)
 
@@ -291,17 +279,13 @@ def implied_no_margin(h, d, a):
 
 
 def fetch_all_leagues(conn: sqlite3.Connection) -> list:
-    """
-    Скачивает матчи и котировки по всем 5 лигам за ближайшие 14 дней.
-    Возвращает список матчей для анализа.
-    """
     conn.execute(ODDS_SCHEMA)
     conn.execute(UPCOMING_SCHEMA)
     conn.commit()
 
     now     = datetime.now(timezone.utc)
-    cutoff       = now + timedelta(days=14)  # анонсы на 14 дней
-    predict_cutoff = now + timedelta(days=4)  # прогнозы только на 4 дня
+    cutoff       = now + timedelta(days=14)
+    predict_cutoff = now + timedelta(days=4)
     now_str = now.strftime("%Y-%m-%d %H:%M:%S")
     matches = []
 
@@ -333,14 +317,14 @@ def fetch_all_leagues(conn: sqlite3.Connection) -> list:
                 start_dt = datetime.fromisoformat(start_str.replace("Z","+00:00"))
                 if start_dt > cutoff or start_dt < now:
                     continue
-                # Время по Бангкоку (UTC+7)
+
                 bkk_dt  = start_dt + timedelta(hours=7)
                 date_str = bkk_dt.strftime("%Y-%m-%d")
                 time_str = bkk_dt.strftime("%H:%M")
             except Exception:
                 continue
 
-            # Фильтр: в клубных лигах — только топ команды
+
             if sport_key not in SHOW_ALL_LEAGUES:
                 home_norm = TEAM_NORM.get(home, home)
                 away_norm = TEAM_NORM.get(away, away)
@@ -349,10 +333,10 @@ def fetch_all_leagues(conn: sqlite3.Connection) -> list:
                 if not home_is_top and not away_is_top:
                     continue
 
-            # Помечаем матч как "прогнозируемый" если в ближайшие 3 дня
+
             is_predictable = start_dt <= predict_cutoff
 
-            # Сохраняем матч
+
             try:
                 conn.execute("""
                     INSERT OR IGNORE INTO upcoming_matches
@@ -362,7 +346,7 @@ def fetch_all_leagues(conn: sqlite3.Connection) -> list:
             except Exception:
                 pass
 
-            # Сохраняем котировки
+
             for bm in game.get("bookmakers",[]):
                 for mkt in bm.get("markets",[]):
                     if mkt.get("key") != "h2h":
@@ -418,10 +402,6 @@ def get_avg_odds(conn, home, away):
         return {}
 
 
-# ═══════════════════════════════════════════════════════════════════════════════
-#  2. ML-ПРОГНОЗ
-# ═══════════════════════════════════════════════════════════════════════════════
-
 def load_models():
     models = {}
     for name in ["n1_form","n2_h2h","n3_odds","n4_full","n5_agg",
@@ -444,9 +424,7 @@ def predict_one(models, conn, home, away, match_date, league_key="soccer_epl"):
         log.info(f"Котировки ({odds['bookmakers']} букм.): "
                  f"Х={odds['raw_oh']:.2f} Н={odds['raw_od']:.2f} Г={odds['raw_oa']:.2f}")
 
-    # Выбираем источник данных:
-    # если ANTHROPIC_API_KEY задан — используем агентов (Claude web search)
-    # иначе — обычный live_collector (ESPN + DB)
+
     if ANTHROPIC_API_KEY:
         from agent_collector import collect_features_with_agents, set_api_key, apply_news_adjustment
         set_api_key(ANTHROPIC_API_KEY)
@@ -455,20 +433,20 @@ def predict_one(models, conn, home, away, match_date, league_key="soccer_epl"):
         from live_collector import collect_match_features
         live = collect_match_features(home, away, match_date, odds or {}, league_key)
 
-    # Извлекаем новости до удаления мета-ключей
+
     news_home = live.pop("_news_home", {})
     news_away = live.pop("_news_away", {})
     src = live.pop("_sources", {})
     log.info(f"Источники: форма={src.get('home_form')}/{src.get('away_form')}, "
              f"H2H={src.get('h2h','DB')}, ctx={src.get('context_h','?')}")
 
-    # ── Добавляем признаки мотивации и UEFA из БД ────────────────────────────
+
     try:
         _fc = sqlite3.connect(DB_PATH)
         home_db = TEAM_NORM.get(home, home)
         away_db = TEAM_NORM.get(away, away)
 
-        # Берём последние известные признаки мотивации из matches_features
+
         def get_motivation(team):
             row = _fc.execute("""
                 SELECT home_position, home_relegation_gap, home_title_gap,
@@ -504,7 +482,7 @@ def predict_one(models, conn, home, away, match_date, league_key="soccer_epl"):
         am = get_motivation(away_db)
         _fc.close()
 
-        # Заполняем недостающие признаки
+
         from build_features import get_uefa_coeff as _get_coeff
         hcoeff = hm.get("uefa_coeff") or _get_coeff(home)
         acoeff = am.get("uefa_coeff") or _get_coeff(away)
@@ -531,7 +509,7 @@ def predict_one(models, conn, home, away, match_date, league_key="soccer_epl"):
     except Exception as _me:
         log.debug(f"Мотивация/UEFA: {_me}")
 
-    # Заполняем ВСЕ возможные признаки значениями по умолчанию
+
     FEAT_DEFAULTS = {
         "home_pts_avg": 1.5, "away_pts_avg": 1.2,
         "home_win_rate": 0.4, "away_win_rate": 0.3,
@@ -563,7 +541,7 @@ def predict_one(models, conn, home, away, match_date, league_key="soccer_epl"):
     df_r = pd.DataFrame([live])
 
     def safe_X(feat_list):
-        # Добавляем недостающие колонки со значением NaN (SimpleImputer заполнит)
+
         import numpy as np
         missing = [c for c in feat_list if c not in df_r.columns]
         for c in missing:
@@ -587,7 +565,7 @@ def predict_one(models, conn, home, away, match_date, league_key="soccer_epl"):
                     [("n1",p1),("n2",p2),("n3",p3),("n4",p4),("n5",p5)])
              for c in classes}
 
-    # ── N7: Прогноз API-Football ──────────────────────────────────────────────
+
     try:
         _c = sqlite3.connect(DB_PATH)
         api_pred = _c.execute("""
@@ -602,7 +580,7 @@ def predict_one(models, conn, home, away, match_date, league_key="soccer_epl"):
 
         if api_pred and api_pred[0]:
             h_p, d_p, a_p, w_team, g_h, g_a, advice = api_pred
-            # Нормализуем
+
             total_p = (h_p or 0) + (d_p or 0) + (a_p or 0)
             if total_p > 0.1:
                 api_signal = {
@@ -610,7 +588,7 @@ def predict_one(models, conn, home, away, match_date, league_key="soccer_epl"):
                     "D": (d_p or 0) / total_p,
                     "A": (a_p or 0) / total_p,
                 }
-                # Добавляем API прогноз с весом 12%
+
                 W7 = 0.12
                 scale = 1.0 - W7
                 for c in classes:
@@ -620,10 +598,10 @@ def predict_one(models, conn, home, away, match_date, league_key="soccer_epl"):
     except Exception as _e:
         log.debug(f"  N7 API-pred error: {_e}")
 
-    # ── Корректировка на основе состава ──────────────────────────────────────
+
     try:
         _c = sqlite3.connect(DB_PATH)
-        # Проверяем наличие состава (признак что все игроки в наличии)
+
         for team_name, result_key in [(home, "H"), (away, "A")]:
             lineup_row = _c.execute("""
                 SELECT lineup_json, formation FROM match_lineups ml
@@ -645,7 +623,7 @@ def predict_one(models, conn, home, away, match_date, league_key="soccer_epl"):
                 starters    = lineup_data.get("start", [])
                 n_starters  = len(starters)
 
-                # Если меньше 11 стартовых — команда ослаблена (резервный состав)
+
                 if n_starters < 11:
                     adj = -0.04 * (11 - n_starters)
                     final[result_key] = max(0.05, final[result_key] + adj)
@@ -676,33 +654,32 @@ def predict_one(models, conn, home, away, match_date, league_key="soccer_epl"):
             if p > bp:
                 bp, bsh, bsa = p, gh, ga
 
-    # ── Согласование счёта и победителя ──────────────────────────────────────
-    # Если счёт равный но победитель не "Ничья" — исправляем
+
     if bsh == bsa and wc != "D":
-        # Берём ничью если она достаточно вероятна (>20%)
+
         if final.get("D", 0) > 0.20:
             wc = "D"
             wp = final["D"]
             wn = "Ничья"
         else:
-            # Иначе сдвигаем счёт в пользу победителя
+
             if wc == "H":
                 bsh = bsa + 1
             else:
                 bsa = bsh + 1
 
-    # Если счёт разный но победитель "Ничья" — исправляем счёт
+
     elif bsh != bsa and wc == "D":
         if bsh > bsa:
-            bsa = bsh  # выравниваем
+            bsa = bsh
         else:
-            bsh = bsa  # выравниваем
+            bsh = bsa
 
     fg = round(90/(lh+la)) if lh+la > 0 else None
     conf = ("high" if wp>=CONFIDENCE_THR["high"] else
             "medium" if wp>=CONFIDENCE_THR["medium"] else "low")
 
-    # ── Поправка новостей N5 ──────────────────────────────────────────────────
+
     wp_original = wp
     if news_home or news_away:
         if ANTHROPIC_API_KEY:
@@ -720,17 +697,16 @@ def predict_one(models, conn, home, away, match_date, league_key="soccer_epl"):
             if abs(wp - wp_original) >= 0.01:
                 log.info(f"  📰 Новостная поправка: {wp_original:.2f} → {wp:.2f}")
 
-    # ── Поправка на форму и отдых (из аналитики highlights) ──────────────────
+
     try:
         from run_bot import TEAM_NORM
         _DB = sqlite3.connect(DB_PATH)
 
         def form_adjustment(team_name, is_winner):
-            """Считает поправку на основе реальной формы и отдыха."""
             db_team = TEAM_NORM.get(team_name, team_name)
             adj = 0.0
 
-            # Форма последних 6 матчей
+
             rows = _DB.execute("""
                 SELECT ftr, home_team FROM matches_features
                 WHERE (home_team=? OR away_team=?)
@@ -740,11 +716,11 @@ def predict_one(models, conn, home, away, match_date, league_key="soccer_epl"):
                 wins = sum(1 for ftr, ht in rows
                            if (ftr=="H" and ht==db_team) or (ftr=="A" and ht!=db_team))
                 win_rate = wins / len(rows)
-                # Отклонение от средней формы (0.4 = среднее)
+
                 form_delta = (win_rate - 0.40) * 0.08
                 adj += form_delta
 
-            # Дни отдыха
+
             last = _DB.execute("""
                 SELECT MAX(date) FROM matches_features
                 WHERE home_team=? OR away_team=?
@@ -754,7 +730,7 @@ def predict_one(models, conn, home, away, match_date, league_key="soccer_epl"):
                     from datetime import date as _d
                     days = (_d.fromisoformat(match_date) -
                             _d.fromisoformat(last[0][:10])).days
-                    # Оптимум 5-10 дней. Меньше 3 — усталость. Больше 14 — застой.
+
                     if days <= 2:
                         adj -= 0.03
                     elif days >= 14:
@@ -767,7 +743,7 @@ def predict_one(models, conn, home, away, match_date, league_key="soccer_epl"):
         adj_a = form_adjustment(away, wc == "A")
         _DB.close()
 
-        # Применяем к победителю
+
         if wc == "H" and abs(adj_h) >= 0.01:
             wp = max(0.05, min(0.95, wp + adj_h))
             log.info(f"  📊 Поправка формы {home}: {adj_h:+.3f} → wp={wp:.2f}")
@@ -790,7 +766,7 @@ def predict_one(models, conn, home, away, match_date, league_key="soccer_epl"):
         "lambda_h":lh,"lambda_a":la,"first_goal":fg,
         "confidence":conf,"odds":odds,
         "league_key":league_key,
-        # Новости
+
         "news_home": news_summary_h,
         "news_away": news_summary_a,
         "absences_home": key_absences_h,
@@ -798,20 +774,12 @@ def predict_one(models, conn, home, away, match_date, league_key="soccer_epl"):
     }
 
 
-# ═══════════════════════════════════════════════════════════════════════════════
-#  3. ДООБУЧЕНИЕ МОДЕЛЕЙ на новых данных
-# ═══════════════════════════════════════════════════════════════════════════════
-
 def update_models_with_new_data(models):
-    """
-    Проверяет есть ли новые завершённые матчи в БД,
-    которые ещё не вошли в обучение. Если есть — дообучает модели.
-    """
     try:
         conn = sqlite3.connect(DB_PATH)
-        # Смотрим последнюю дату в features
+
         last = pd.read_sql("SELECT MAX(date) as d FROM matches_features", conn).iloc[0]["d"]
-        # Смотрим есть ли новые матчи в matches после этой даты
+
         new = pd.read_sql(f"""
             SELECT COUNT(*) as cnt FROM matches_raw
             WHERE date > '{last}' AND FTR IS NOT NULL
@@ -824,12 +792,12 @@ def update_models_with_new_data(models):
 
         log.info(f"Найдено {new} новых матчей — запускаю дообучение...")
 
-        # Пересчитываем features и переобучаем
+
         import subprocess, sys
         subprocess.run([sys.executable, "build_features.py"], check=True)
         subprocess.run([sys.executable, "train_models.py"],   check=True)
 
-        # Перезагружаем свежие модели
+
         new_models = load_models()
         log.info("Модели успешно дообучены и перезагружены")
         return new_models
@@ -838,10 +806,6 @@ def update_models_with_new_data(models):
         log.warning(f"Дообучение пропущено: {e}")
         return models
 
-
-# ═══════════════════════════════════════════════════════════════════════════════
-#  4. ФОРМАТИРОВАНИЕ
-# ═══════════════════════════════════════════════════════════════════════════════
 
 def format_message(r, time_bkk, match_date, league_name):
     from live_collector import get_first_goal_prediction
@@ -853,7 +817,7 @@ def format_message(r, time_bkk, match_date, league_name):
         if n in (2,3,4):  return f"{n} гола"
         return f"{n} голов"
 
-    # Аналитика первого гола из последних 5 матчей
+
     league_key = r.get("league_key", "soccer_epl")
     fg_result = get_first_goal_prediction(
         r["home"], r["away"],
@@ -861,16 +825,15 @@ def format_message(r, time_bkk, match_date, league_name):
         league_key
     )
 
-    # ── Позитивная аналитика команд ──────────────────────────────────────────
+
     def get_team_highlights(team_name, is_winner):
-        """Собирает позитивные факты о команде из БД."""
         highlights = []
         try:
             from run_bot import TEAM_NORM
             db_team = TEAM_NORM.get(team_name, team_name)
             _c = sqlite3.connect(DB_PATH)
 
-            # Дни отдыха
+
             last_match = _c.execute("""
                 SELECT MAX(date) FROM matches_features
                 WHERE home_team=? OR away_team=?
@@ -887,7 +850,7 @@ def format_message(r, time_bkk, match_date, league_name):
                 except Exception:
                     pass
 
-            # Форма — последние 6 матчей
+
             rows = _c.execute("""
                 SELECT ftr, home_team FROM matches_features
                 WHERE (home_team=? OR away_team=?)
@@ -904,7 +867,7 @@ def format_message(r, time_bkk, match_date, league_name):
                 elif wins <= 1:
                     highlights.append(f"  📉 слабая форма: {wins}/{total} побед")
 
-            # Позиция в таблице
+
             _API_NAMES = {
                 "Man City": "Manchester City", "Man United": "Manchester United",
                 "Newcastle": "Newcastle United", "Wolves": "Wolverhampton",
@@ -934,7 +897,7 @@ def format_message(r, time_bkk, match_date, league_name):
             pass
         return highlights
 
-    # Собираем аналитику для обеих команд
+
     home_highlights = get_team_highlights(r["home"], r["winner_name"] == r["home"])
     away_highlights = get_team_highlights(r["away"], r["winner_name"] == r["away"])
 
@@ -950,7 +913,7 @@ def format_message(r, time_bkk, match_date, league_name):
         f"({r['home']} — {goals_word(r['score_h'])}, {r['away']} — {goals_word(r['score_a'])})",
     ]
 
-    # Первый гол
+
     if fg_result:
         player, fg_team, minute, conf_pct = fg_result
         lines += [
@@ -960,7 +923,7 @@ def format_message(r, time_bkk, match_date, league_name):
     else:
         lines += [f"", f"⏱ <b>Первый гол:</b>  нет данных"]
 
-    # Новости — травмы и аналитика
+
     news_h = r.get("news_home","")
     news_a = r.get("news_away","")
     abs_h  = r.get("absences_home",[])
@@ -969,21 +932,20 @@ def format_message(r, time_bkk, match_date, league_name):
     news_lines = []
 
     def format_team_news(team_name, absences, highlights, news_summary):
-        """Форматирует блок новостей команды: травмы + аналитика + новости."""
         block = []
-        # Травмы
+
         if absences:
             block.append(f"  🏥 <b>{team_name}:</b>")
             for entry in absences[:4]:
                 block.append(f"    — {entry}")
         else:
             block.append(f"  ✅ <b>{team_name}:</b> нет травм и дисквалификаций")
-        # Позитивная аналитика
+
         for h in highlights[:3]:
             block.append(h)
-        # Новости из Claude — только если это НЕ дубль травм
+
         if news_summary and news_summary not in ("Нет значимых новостей", "Нет данных", ""):
-            # Пропускаем если новость это просто список травм (дубль)
+
             is_injury_dup = news_summary.lower().startswith(("травмирован", "injured"))
             if not is_injury_dup:
                 block.append(f"  📰 {news_summary[:200]}")
@@ -992,12 +954,10 @@ def format_message(r, time_bkk, match_date, league_name):
     news_lines.append(format_team_news(r["home"], abs_h, home_highlights, news_h))
     news_lines.append(format_team_news(r["away"], abs_a, away_highlights, news_a))
 
-    # ── Новости и травмы ─────────────────────────────────────────────────────
+
     lines += [f"", f"🗞 <b>Аналитика команд:</b>"] + news_lines
 
-    # Прогноз API учитывается в расчёте (N7), но не показывается пользователю
 
-    # ── Составы ───────────────────────────────────────────────────────────────
     try:
         _c = sqlite3.connect(DB_PATH)
         lineup_found = False
@@ -1023,7 +983,7 @@ def format_message(r, time_bkk, match_date, league_name):
                     lines += [f""]
                     lines += [f"  {label} <b>{team_name}</b>  [{formation}]"
                               + (f"  · тренер: {coach}" if coach else "")]
-                    # Разбиваем по позициям
+
                     gk  = [p["name"] for p in ldata["start"] if p.get("pos") == "G"]
                     df  = [p["name"] for p in ldata["start"] if p.get("pos") == "D"]
                     mid = [p["name"] for p in ldata["start"] if p.get("pos") == "M"]
@@ -1045,11 +1005,6 @@ def format_message(r, time_bkk, match_date, league_name):
     return "\n".join(lines)
 
 
-# ═══════════════════════════════════════════════════════════════════════════════
-#  5. TELEGRAM
-# ═══════════════════════════════════════════════════════════════════════════════
-
-# ── Схема таблицы отправленных сообщений ──────────────────────────────────────
 SENT_SCHEMA = """
 CREATE TABLE IF NOT EXISTS sent_messages (
     id           INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1092,10 +1047,6 @@ def _match_key(home: str, away: str, date: str) -> str:
 def _already_sent(conn, home: str, away: str, date: str,
                   winner_name: str, winner_prob: int,
                   score_h: int, score_a: int) -> bool:
-    """
-    Возвращает True если сообщение уже отправлялось И данные не изменились.
-    Если данные изменились — удаляет старую запись (будет отправлено заново).
-    """
     key = _match_key(home, away, date)
     row = conn.execute(
         "SELECT winner_name, winner_prob, score_h, score_a FROM sent_messages WHERE match_key=?",
@@ -1103,12 +1054,12 @@ def _already_sent(conn, home: str, away: str, date: str,
     ).fetchone()
     if not row:
         return False
-    # Данные совпадают — не отправлять
+
     if (row[0] == winner_name and row[1] == winner_prob
             and row[2] == score_h and row[3] == score_a):
         log.info(f"  ⏭ Уже отправлено без изменений: {home} vs {away} — пропуск")
         return True
-    # Данные изменились — удаляем, отправим заново
+
     conn.execute("DELETE FROM sent_messages WHERE match_key=?", (key,))
     conn.commit()
     log.info(f"  🔄 Данные изменились: {home} vs {away} — обновляем")
@@ -1134,7 +1085,6 @@ def _save_sent(conn, home: str, away: str, date: str,
 
 
 def send_to_channel(text: str, add_webapp_btn: bool = False) -> int | None:
-    """Отправляет в канал, возвращает message_id или None."""
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
     for attempt in range(3):
         try:
@@ -1151,7 +1101,7 @@ def send_to_channel(text: str, add_webapp_btn: bool = False) -> int | None:
                 log.info("Сообщение отправлено в канал")
                 return r.json().get("result", {}).get("message_id")
             elif r.status_code == 429:
-                # Too Many Requests — ждём сколько сказал Telegram
+
                 retry_after = r.json().get("parameters", {}).get("retry_after", 20)
                 log.warning(f"Telegram 429: ждём {retry_after}с...")
                 time.sleep(retry_after + 1)
@@ -1165,12 +1115,10 @@ def send_to_channel(text: str, add_webapp_btn: bool = False) -> int | None:
 
 
 def send_telegram(text: str) -> bool:
-    """Обратная совместимость."""
     return send_to_channel(text) is not None
 
 
 def send_dm(text: str):
-    """Отправляет личное сообщение владельцу."""
     if not OWNER_CHAT_ID:
         return
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
@@ -1183,12 +1131,10 @@ def send_dm(text: str):
 
 
 def get_message_views(message_id: int) -> int:
-    """Получает количество просмотров сообщения в канале."""
     try:
         url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/forwardMessage"
-        # Для каналов используем getChat + getChatMember не работает для просмотров
-        # Используем getMessage через channel forward trick
-        # Просто возвращаем -1 (Telegram не даёт просмотры через Bot API для обычных каналов)
+
+
         return -1
     except Exception:
         return -1
@@ -1206,9 +1152,8 @@ def send_header(total, passed, leagues_str):
 
 
 def send_no_matches():
-    """Если прогнозов нет — ищем свежие футбольные новости через Claude."""
 
-    # Пробуем найти новости через Claude
+
     if ANTHROPIC_API_KEY:
         try:
             from agent_collector import _claude_search, _parse_json_from_text
@@ -1259,7 +1204,7 @@ Return ONLY JSON:
         except Exception as e:
             log.debug(f"Новости не получены: {e}")
 
-    # Fallback если Claude недоступен
+
     send_to_channel(
         f"⚽ <b>Sports Analytics Bot</b>\n{'─'*32}\n\n"
         f"📅 Новых прогнозов на сегодня нет.\n\n"
@@ -1277,13 +1222,9 @@ def send_footer(sent, skipped):
 
 
 def _get_real_result(home: str, away: str) -> tuple | None:
-    """
-    Ищет реальный результат матча в matches_raw.
-    Возвращает (real_score_h, real_score_a, real_winner) или None.
-    """
     try:
         conn2 = sqlite3.connect(DB_PATH)
-        # Ищем матч в matches_raw с любым похожим именем
+
         row = conn2.execute("""
             SELECT fthg, ftag, ftr FROM matches_raw
             WHERE (
@@ -1312,15 +1253,11 @@ def _get_real_result(home: str, away: str) -> tuple | None:
 
 
 def check_and_report_results(conn):
-    """
-    Проверяет все ранее отправленные прогнозы — сыгран ли матч.
-    Если сыгран → сравнивает с прогнозом и отправляет владельцу в ЛС.
-    """
     from datetime import date as date_type
 
     today = date_type.today()
 
-    # Берём все прогнозы, которые ещё не проверены и дата матча уже прошла
+
     rows = conn.execute("""
         SELECT match_key, home_team, away_team, match_date,
                winner_name, score_h, score_a
@@ -1340,7 +1277,7 @@ def check_and_report_results(conn):
         key, home, away, match_date, winner_name, score_h, score_a = row
 
         if not home or not away:
-            # Старые записи без имён команд — пропускаем
+
             conn.execute(
                 "UPDATE sent_messages SET result_checked=1 WHERE match_key=?", (key,)
             )
@@ -1348,12 +1285,12 @@ def check_and_report_results(conn):
 
         result = _get_real_result(home, away)
         if not result:
-            # Результата ещё нет в БД — пропускаем до следующего запуска
+
             continue
 
         real_h, real_a, real_winner = result
 
-        # Определяем кто был наш прогноз
+
         if winner_name == home:
             pred_winner = "home"
         elif winner_name == away:
@@ -1363,7 +1300,7 @@ def check_and_report_results(conn):
 
         prediction_ok = 1 if pred_winner == real_winner else 0
 
-        # Сохраняем результат
+
         conn.execute("""
             UPDATE sent_messages
             SET result_checked=1, real_score_h=?, real_score_a=?, prediction_ok=?
@@ -1386,7 +1323,7 @@ def check_and_report_results(conn):
     conn.commit()
 
     if checked > 0:
-        # Общая точность за всё время
+
         stats = conn.execute("""
             SELECT
                 SUM(CASE WHEN prediction_ok=1 THEN 1 ELSE 0 END) as correct,
@@ -1406,7 +1343,6 @@ def check_and_report_results(conn):
 def send_owner_stats(total_matches: int, total_sent: int,
                      new_sent: int, skipped: int,
                      predictions: list):
-    """Отправляет статистику работы владельцу в ЛС."""
     now = datetime.now().strftime("%d.%m.%Y %H:%M")
     lines = [
         f"📊 <b>Статистика запуска</b>",
@@ -1419,7 +1355,7 @@ def send_owner_stats(total_matches: int, total_sent: int,
         f"",
         f"<b>Прогнозы сегодня:</b>",
     ]
-    for r in predictions[:10]:  # не более 10
+    for r in predictions[:10]:
         m = r.get("match", {})
         pct = int(r["winner_prob"] * 100)
         lines.append(
@@ -1434,10 +1370,6 @@ def send_owner_stats(total_matches: int, total_sent: int,
     ]
     send_dm("\n".join(lines))
 
-
-# ═══════════════════════════════════════════════════════════════════════════════
-#  MAIN
-# ═══════════════════════════════════════════════════════════════════════════════
 
 def run():
     import time
@@ -1455,7 +1387,7 @@ def run():
     conn = sqlite3.connect(DB_PATH)
     _init_sent_db(conn)
 
-    # 0. Проверяем результаты прошлых прогнозов
+
     log.info("Проверяю результаты прошлых прогнозов...")
     check_and_report_results(conn)
     all_matches = fetch_all_leagues(conn)
@@ -1464,20 +1396,19 @@ def run():
         conn.close()
         return
 
-    # 2. Модели + дообучение
+
     log.info("Загружаю ML-модели...")
     models = load_models()
     models = update_models_with_new_data(models)
 
-    # 3. Прогнозы — только для матчей в ближайшие 3 дня
+
     results = []
-    announce_only = []  # матчи на 4-14 дней — только анонс
+    announce_only = []
 
     def is_top_match(m):
-        """Проверяет что хотя бы одна из команд входит в топ список."""
         league = m.get("league", "")
         if league in SHOW_ALL_LEAGUES:
-            return True  # В еврокубках все матчи интересны
+            return True
         home = TEAM_NORM.get(m["home"], m["home"])
         away = TEAM_NORM.get(m["away"], m["away"])
         for t in TOP_CLUBS:
@@ -1489,7 +1420,7 @@ def run():
 
     for m in all_matches:
         if not m.get("is_predictable", True):
-            # Анонсируем только топ матчи
+
             if is_top_match(m):
                 announce_only.append(m)
                 log.info(f"📅 Анонс: {m['home']} vs {m['away']} {m['date']} — прогноз не готов")
@@ -1509,30 +1440,25 @@ def run():
 
     log.info(f"Прогнозов: {len(results)}, анонсов без прогноза: {len(announce_only)}")
 
-    # 4. Фильтр 60%+
+
     def smart_filter(r):
-        """Прогноз отправляем только если:
-        1. Вероятность >= 72%
-        2. Котировки букмекеров подтверждают фаворита (коэф < 2.0)
-        3. Фаворит играет дома ИЛИ вероятность >= 75%
-        """
         if r["winner_prob"] < MIN_SEND_PROB:
             return False
 
         m = r["match"]
         winner = r["winner_name"]
 
-        # Проверяем котировки — фаворит должен иметь коэф < 2.5
-        ph = r.get("ph", 0)  # вероятность победы хозяев по котировкам
-        pa = r.get("pa", 0)  # вероятность победы гостей по котировкам
+
+        ph = r.get("ph", 0)
+        pa = r.get("pa", 0)
         is_home_win = winner == m["home"]
 
         odds_prob = ph if is_home_win else pa
-        if odds_prob < 0.40:  # котировки дают фавориту меньше 40% — пропускаем
+        if odds_prob < 0.40:
             log.info(f"⚠️ {winner} отфильтрован — котировки не подтверждают ({odds_prob:.0%})")
             return False
 
-        # Дополнительный фильтр: гостевой фаворит требует 72%+
+
         if not is_home_win and r["winner_prob"] < 0.65:
             log.info(f"⚠️ {winner} отфильтрован — гостевой фаворит с низкой уверенностью")
             return False
@@ -1546,24 +1472,23 @@ def run():
     skipped_filter = len(results) - len(to_send)
     log.info(f"Итого: {len(to_send)} прошли фильтр, {skipped_filter} пропущено")
 
-    # 5. Дедупликация — убираем уже отправленные без изменений
-    # И дедупликация внутри одного запуска (если матч встречается дважды)
+
     to_send_new = []
     skipped_dedup = 0
-    seen_keys = set()  # защита от дублей внутри одного запуска
+    seen_keys = set()
 
     for r in to_send:
         m = r["match"]
         run_key = _match_key(m["home"], m["away"], m["date"])
 
-        # Дубль внутри одного запуска
+
         if run_key in seen_keys:
             log.info(f"  ⏭ Дубль в списке: {m['home']} vs {m['away']} — пропуск")
             skipped_dedup += 1
             continue
         seen_keys.add(run_key)
 
-        # Уже отправлено в прошлых запусках
+
         already = _already_sent(
             conn,
             m["home"], m["away"], m["date"],
@@ -1577,7 +1502,7 @@ def run():
 
     log.info(f"Дубли пропущено: {skipped_dedup}, новых к отправке: {len(to_send_new)}")
 
-    # 5б. Загружаем новости только для матчей которые будем отправлять
+
     if to_send_new and ANTHROPIC_API_KEY:
         log.info(f"📰 Загружаю новости для {len(to_send_new)} матчей...")
         from agent_collector import n5_agent_news, set_api_key
@@ -1598,18 +1523,18 @@ def run():
                 r.setdefault("absences_home", [])
                 r.setdefault("absences_away", [])
 
-    # 6. Telegram — канал
+
     leagues_str = " | ".join(set(r["match"]["league_name"] for r in to_send)) or "—"
 
     if not to_send_new and not to_send:
-        # Совсем нет матчей с 60%+
+
         send_no_matches()
         send_owner_stats(len(results), 0, 0, skipped_filter, [])
         conn.close()
         return
 
     if not to_send_new and to_send:
-        # Прогнозы есть, но все уже были отправлены — шлём новости
+
         log.info("Все прогнозы уже отправлены — публикую новости дня")
         send_no_matches()
         conn.close()
@@ -1617,7 +1542,7 @@ def run():
 
     TG_LIMIT = 4096
 
-    # Порядок лиг
+
     LEAGUE_ORDER = [
         "🏆 Лига Чемпионов",
         "🥈 Лига Европы",
@@ -1628,7 +1553,7 @@ def run():
         "🇫🇷 Лига 1",
     ]
 
-    # Группируем по лигам, внутри — по дате
+
     from collections import defaultdict
     by_league = defaultdict(list)
     for r in to_send_new:
@@ -1637,36 +1562,36 @@ def run():
         log.info(re.sub(r"<[^>]+>", "", msg[:200]))
         by_league[m["league_name"]].append((r, m, msg))
 
-    # Сортируем лиги в нужном порядке
+
     sorted_leagues = sorted(
         by_league.keys(),
         key=lambda x: LEAGUE_ORDER.index(x) if x in LEAGUE_ORDER else 99
     )
 
-    # Каждая пара = отдельное сообщение, с заголовком лиги
+
     sent = 0
     all_blocks = []
     now_bkk = (datetime.now(timezone.utc) + timedelta(hours=7)).strftime("%d.%m.%Y")
 
     for league_name in sorted_leagues:
         league_blocks = by_league[league_name]
-        # Сортируем матчи лиги по дате
+
         league_blocks.sort(key=lambda x: x[1]["date"])
 
         for r, m, msg in league_blocks:
-            # Заголовок лиги в каждом сообщении
+
             league_header = (
                 f"⚽ <b>{league_name}</b>\n"
                 f"{'─'*34}"
             )
-            # format_message начинается с пустой строки — берём всё сообщение целиком
+
             full_msg = league_header + "\n" + msg.lstrip("\n")
 
-            # Если сообщение слишком длинное — обрезаем составы
+
             if len(full_msg) > TG_LIMIT:
                 full_msg = full_msg[:TG_LIMIT - 10] + "\n..."
 
-            # Кнопка календаря только на последнем сообщении дня
+
             is_last = (league_blocks.index((r, m, msg)) == len(league_blocks) - 1
                        and sorted_leagues.index(league_name) == len(sorted_leagues) - 1)
             msg_id = send_to_channel(full_msg, add_webapp_btn=is_last)
@@ -1676,7 +1601,7 @@ def run():
 
         all_blocks.extend(league_blocks)
 
-    # Сохраняем отправленные прогнозы (65%+) в БД
+
     for r, m, msg in all_blocks:
         fg = r.get("first_goal")
         fg_player = fg[0] if fg and isinstance(fg, (list, tuple)) and len(fg) >= 1 else None
@@ -1691,7 +1616,7 @@ def run():
             fg_player, fg_team, fg_minute
         )
 
-    # Сохраняем ВСЕ прогнозы в БД (включая ниже 65%) — для Web App
+
     for r in results:
         m = r["match"]
         if r["winner_prob"] < MIN_SEND_PROB:
@@ -1699,7 +1624,7 @@ def run():
             fg_player = fg[0] if fg and isinstance(fg, (list, tuple)) and len(fg) >= 1 else None
             fg_team   = fg[1] if fg and isinstance(fg, (list, tuple)) and len(fg) >= 2 else None
             fg_minute = fg[2] if fg and isinstance(fg, (list, tuple)) and len(fg) >= 3 else None
-            # Проверяем не записан ли уже этот матч
+
             key = f"{m['home']}|{m['away']}|{m['date']}"
             existing = conn.execute(
                 "SELECT 1 FROM sent_messages WHERE match_key=?", (key,)
@@ -1714,7 +1639,7 @@ def run():
                     fg_player, fg_team, fg_minute
                 )
 
-    # 7. Личная статистика владельцу
+
     send_owner_stats(
         total_matches=len(results),
         total_sent=len(to_send),

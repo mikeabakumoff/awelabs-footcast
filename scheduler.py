@@ -1,14 +1,7 @@
-"""
-scheduler.py - Ежедневный автозапуск бота в 09:00 Bangkok
-
-Запуск в фоне: pythonw scheduler.py
-Остановка: диспетчер задач -> завершить pythonw.exe
-"""
-
 import sys
 import os
 
-# Устанавливаем UTF-8 для Windows консоли
+
 if sys.platform == "win32":
     os.system("chcp 65001 > nul")
     try:
@@ -19,7 +12,7 @@ if sys.platform == "win32":
 import time
 import logging
 
-# UTF-8 для Windows
+
 if sys.platform == "win32":
     os.system("chcp 65001 > nul 2>&1")
     try:

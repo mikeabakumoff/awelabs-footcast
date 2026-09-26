@@ -1,9 +1,3 @@
-"""
-live_collector.py v3.0
-Автоматический поиск ID команд через ESPN Teams API.
-Работает для ЛЮБОЙ команды из 5 лиг без хардкода ID.
-"""
-
 import time
 import logging
 import requests
@@ -35,18 +29,17 @@ HEADERS = {
 }
 
 
-# ESPN league slugs для поиска команд
 ESPN_LEAGUES = ["eng.1", "esp.1", "ger.1", "ita.1", "fra.1"]
 
-# ── Кеши ─────────────────────────────────────────────────────────────────────
-_team_id_cache: dict = {}    # "Team Name" → ESPN team id
-_form_cache: dict    = {}    # "Team Name" → form dict
-_ctx_cache: dict     = {}    # "Team Name" → context dict
-_scorers_cache: dict = {}    # "Team Name" → scorers list
 
-# ── Известные ID (для быстрого старта, пополняется автоматически) ─────────────
+_team_id_cache: dict = {}
+_form_cache: dict    = {}
+_ctx_cache: dict     = {}
+_scorers_cache: dict = {}
+
+
 _KNOWN_IDS = {
-    # АПЛ
+
     "Man City": "382",       "Arsenal": "359",       "Liverpool": "364",
     "Crystal Palace": "384", "Man United": "360",    "Brentford": "397",
     "Chelsea": "363",        "Tottenham": "367",     "Newcastle United": "361",
@@ -55,7 +48,7 @@ _KNOWN_IDS = {
     "Bournemouth": "349",    "Wolverhampton Wanderers": "380",
     "Nottingham Forest": "374", "Leeds United": "357", "Burnley": "349",
     "Sunderland": "376",
-    # Ла Лига
+
     "Real Madrid": "86",     "Barcelona": "83",      "Atlético Madrid": "1068",
     "Athletic Bilbao": "93", "Real Sociedad": "116", "Villarreal": "102",
     "Real Betis": "95",      "Sevilla": "96",        "Valencia": "100",
@@ -63,14 +56,14 @@ _KNOWN_IDS = {
     "Mallorca": "97",        "Rayo Vallecano": "91", "Espanyol": "88",
     "Getafe": "9906",        "Levante": "94",        "Alavés": "9913",
     "Oviedo": "108",         "Elche CF": "9801",
-    # Бундеслига
+
     "Bayern Munich": "132",  "Dortmund": "124",      "Bayer Leverkusen": "168",
     "RB Leipzig": "23826",   "Eintracht Frankfurt": "9823", "VfB Stuttgart": "149",
     "SC Freiburg": "143",    "Werder Bremen": "167", "Borussia Monchengladbach": "123",
     "VfL Wolfsburg": "166",  "Augsburg": "16788",    "Union Berlin": "24776",
     "TSG Hoffenheim": "9797","FSV Mainz 05": "162",  "FC St. Pauli": "144",
     "1. FC Köln": "161",     "Hamburger SV": "145",  "1. FC Heidenheim": "30989",
-    # Серия А
+
     "Inter Milan": "110",    "AC Milan": "103",      "Juventus": "109",
     "Napoli": "114",         "Roma": "104",          "Lazio": "111",
     "Atalanta BC": "105",    "Fiorentina": "107",    "Bologna": "106",
@@ -78,7 +71,7 @@ _KNOWN_IDS = {
     "Hellas Verona": "120",  "Lecce": "9807",        "Cagliari": "9816",
     "Sassuolo": "9813",      "Como": "9804",         "Parma": "115",
     "Cremonese": "9808",     "Pisa": "9825",         "AS Roma": "104",
-    # Лига 1
+
     "PSG": "160",            "Paris Saint Germain": "160", "Marseille": "516",
     "Lyon": "518",           "AS Monaco": "160",    "Lille": "521",
     "Nice": "524",           "Lens": "522",         "RC Lens": "522",
@@ -104,19 +97,10 @@ def _get(url, params=None, source=""):
 
 
 def _normalize(name: str) -> str:
-    """Приводим имя команды к нижнему регистру без лишних символов."""
     return re.sub(r"[^a-z0-9 ]", "", name.lower()).strip()
 
 
-# ═══════════════════════════════════════════════════════════════════════════════
-#  Автоматический поиск ESPN ID команды
-# ═══════════════════════════════════════════════════════════════════════════════
-
 def _search_espn_id(team_name: str) -> str | None:
-    """
-    Ищет ESPN ID команды перебирая все лиги.
-    Использует нечёткое совпадение по имени.
-    """
     norm_target = _normalize(team_name)
 
     for league in ESPN_LEAGUES:
@@ -130,12 +114,12 @@ def _search_espn_id(team_name: str) -> str | None:
             teams = data.get("sports",[{}])[0].get("leagues",[{}])[0].get("teams",[])
             names_ids = [(t["team"]["displayName"], t["team"]["id"]) for t in teams]
 
-            # Точное совпадение
+
             for dname, tid in names_ids:
                 if _normalize(dname) == norm_target:
                     return str(tid)
 
-            # Нечёткое совпадение
+
             all_names = [n for n, _ in names_ids]
             matches = get_close_matches(team_name, all_names, n=1, cutoff=0.7)
             if matches:
@@ -149,7 +133,6 @@ def _search_espn_id(team_name: str) -> str | None:
 
 
 def get_espn_id(team: str) -> str | None:
-    """Возвращает ESPN ID команды (из кеша или через поиск)."""
     if team in _KNOWN_IDS:
         return _KNOWN_IDS[team]
     if team in _team_id_cache:
@@ -158,17 +141,12 @@ def get_espn_id(team: str) -> str | None:
     tid = _search_espn_id(team)
     _team_id_cache[team] = tid
     if tid:
-        _KNOWN_IDS[team] = tid  # запоминаем на будущее
+        _KNOWN_IDS[team] = tid
         log.debug(f"ESPN ID найден: '{team}' → {tid}")
     return tid
 
 
-# ═══════════════════════════════════════════════════════════════════════════════
-#  N1 — Форма команды
-# ═══════════════════════════════════════════════════════════════════════════════
-
 def _form_from_espn(team: str) -> dict:
-    """Последние 5 матчей через ESPN /sports/soccer/all/teams/{id}/schedule"""
     tid = get_espn_id(team)
     if not tid:
         return {}
@@ -183,24 +161,24 @@ def _form_from_espn(team: str) -> dict:
     try:
         events = data.get("events", [])
 
-        # Фильтруем завершённые матчи — проверяем несколько возможных путей
+
         def is_completed(ev):
             comp = ev.get("competitions",[{}])[0]
             st   = comp.get("status",{})
-            # Путь 1: status.type.completed
+
             if st.get("type",{}).get("completed"):
                 return True
-            # Путь 2: status.type.state == "post"
+
             if st.get("type",{}).get("state","") == "post":
                 return True
-            # Путь 3: status.type.name содержит FULL_TIME
+
             if "FULL_TIME" in st.get("type",{}).get("name","").upper():
                 return True
             return False
 
         done = [e for e in events if is_completed(e)]
 
-        # Берём только матчи текущего сезона (не старше 365 дней)
+
         from datetime import datetime, timezone
         now = datetime.now(timezone.utc)
         recent_done = []
@@ -222,7 +200,7 @@ def _form_from_espn(team: str) -> dict:
             comp  = ev.get("competitions",[{}])[0]
             comps = comp.get("competitors", [])
 
-            # Ищем нашу команду по id ИЛИ по homeAway
+
             mine = None
             opp  = None
             for c in comps:
@@ -232,9 +210,9 @@ def _form_from_espn(team: str) -> dict:
                 else:
                     opp = c
 
-            # Если не нашли по id — пробуем по homeAway (наша команда = всегда есть)
+
             if not mine and len(comps) == 2:
-                # Берём первого участника как "нашу" команду (порядок не важен для формы)
+
                 mine, opp = comps[0], comps[1]
 
             if not mine or not opp:
@@ -274,10 +252,6 @@ def _form_from_espn(team: str) -> dict:
 
 
 def _form_from_db(team: str) -> dict:
-    """
-    Берёт форму команды из matches_features.
-    Читает последние 6 матчей по дате и считает актуальную форму.
-    """
     try:
         conn = sqlite3.connect(DB_PATH)
         df = pd.read_sql("""
@@ -334,7 +308,7 @@ def get_team_form_live(team: str) -> dict:
     if key in _form_cache:
         return _form_cache[key]
 
-    # 1. Сначала БД — всегда быстро и надёжно
+
     form = _form_from_db(team)
     if form:
         log.info(f"  ✅ N1 {team}: форма из БД "
@@ -342,7 +316,7 @@ def get_team_form_live(team: str) -> dict:
         _form_cache[key] = form
         return form
 
-    # 2. ESPN — только если в БД совсем нет данных по команде
+
     log.warning(f"  ❗ N1 {team}: нет в БД, пробую ESPN...")
     form = _form_from_espn(team)
     if form:
@@ -360,11 +334,6 @@ def get_team_form_live(team: str) -> dict:
     return form
 
 
-# ═══════════════════════════════════════════════════════════════════════════════
-#  N4 — Контекст (место в таблице, дней отдыха)
-# ═══════════════════════════════════════════════════════════════════════════════
-
-# ESPN league slugs для standings
 ESPN_LEAGUE_SLUGS = {
     "soccer_epl":              "eng.1",
     "soccer_spain_la_liga":    "esp.1",
@@ -373,12 +342,11 @@ ESPN_LEAGUE_SLUGS = {
     "soccer_france_ligue_one": "fra.1",
 }
 
-# Кеш таблиц по лигам
+
 _standings_cache: dict = {}
 
 
 def _get_standings(league_slug: str) -> dict:
-    """Возвращает словарь team_id → position для лиги."""
     if league_slug in _standings_cache:
         return _standings_cache[league_slug]
 
@@ -412,14 +380,14 @@ def get_context_live(team: str, match_date: str, league_key: str = "soccer_epl")
 
     tid = get_espn_id(team)
     if tid:
-        # Таблица
+
         league_slug = ESPN_LEAGUE_SLUGS.get(league_key, "eng.1")
         standings = _get_standings(league_slug)
         if tid in standings:
             ctx["table_position"] = standings[tid]
             ctx["source"] = "ESPN"
 
-        # Последний матч → дней отдыха
+
         data = _get(
             f"https://site.api.espn.com/apis/site/v2/sports/soccer/all/teams/{tid}/schedule",
             source="ESPN schedule ctx"
@@ -455,7 +423,7 @@ def get_context_live(team: str, match_date: str, league_key: str = "soccer_epl")
                         last_d = date.fromisoformat(last_date_str)
                         match_d = date.fromisoformat(match_date)
                         raw_days = (match_d - last_d).days
-                        # Ограничиваем 1–14 дней (ESPN иногда возвращает прошлые сезоны)
+
                         ctx["days_rest"] = float(max(1, min(raw_days, 14)))
             except Exception:
                 pass
@@ -465,10 +433,6 @@ def get_context_live(team: str, match_date: str, league_key: str = "soccer_epl")
     _ctx_cache[key] = ctx
     return ctx
 
-
-# ═══════════════════════════════════════════════════════════════════════════════
-#  H2H из БД
-# ═══════════════════════════════════════════════════════════════════════════════
 
 def get_h2h_live(home: str, away: str) -> dict:
     key = f"h2h_{home}_{away}"
@@ -496,10 +460,6 @@ def get_h2h_live(home: str, away: str) -> dict:
         return {"h2h_n":5,"h2h_home_wr":0.5,"h2h_away_wr":0.3,
                 "h2h_draw_r":0.2,"h2h_avg_goals":2.7}
 
-
-# ═══════════════════════════════════════════════════════════════════════════════
-#  Главная функция
-# ═══════════════════════════════════════════════════════════════════════════════
 
 def collect_match_features(home, away, match_date, odds, league_key="soccer_epl"):
     log.info(f"  📡 Данные: {home} vs {away}")
@@ -552,28 +512,18 @@ def collect_match_features(home, away, match_date, odds, league_key="soccer_epl"
     }
 
 
-
 def clear_cache():
     _form_cache.clear()
     _ctx_cache.clear()
     _standings_cache.clear()
     _first_goal_cache.clear()
-    # ID кеш НЕ чистим — они стабильны
 
-
-# ═══════════════════════════════════════════════════════════════════════════════
-#  АНАЛИТИКА ПЕРВОГО ГОЛА — из последних 5 матчей команды
-# ═══════════════════════════════════════════════════════════════════════════════
 
 _first_goal_cache: dict = {}
 
 
 def _fetch_match_events(event_id: str, league_slug: str = "eng.1") -> list:
-    """
-    Получает события матча (голы) через ESPN API.
-    Возвращает список dict: {scorer, minute, team_id}
-    """
-    # Пробуем разные лиги пока не найдём
+
     for slug in [league_slug, "eng.1", "esp.1", "ger.1", "ita.1", "fra.1"]:
         data = _get(
             f"https://site.api.espn.com/apis/site/v2/sports/soccer/{slug}/summary",
@@ -586,7 +536,7 @@ def _fetch_match_events(event_id: str, league_slug: str = "eng.1") -> list:
             goals = []
             scoring_plays = data.get("scoringPlays", [])
             for play in scoring_plays:
-                # Формат ESPN: type.text == "Goal"
+
                 if play.get("type", {}).get("text", "").lower() not in ("goal", "penalty"):
                     continue
                 minute = play.get("clock", {}).get("displayValue", "")
@@ -610,7 +560,6 @@ def _fetch_match_events(event_id: str, league_slug: str = "eng.1") -> list:
     return []
 
 
-# Маппинг league_key -> league_id API-Football
 _LEAGUE_IDS = {
     "soccer_epl":               39,
     "soccer_spain_la_liga":      140,
@@ -621,12 +570,6 @@ _LEAGUE_IDS = {
 
 
 def get_first_goal_analytics(team: str, league_key: str = "soccer_epl") -> dict:
-    """
-    Возвращает вероятного первого бомбардира команды с реальной средней минутой.
-    Приоритет: 1) scorer_stats (реальные минуты из API-Football events)
-               2) топ-бомбардиры из live_stats (API-Football)
-               3) Claude web search (кеш 7 дней)
-    """
     key = f"fg_{team}"
     if key in _first_goal_cache:
         return _first_goal_cache[key]
@@ -637,7 +580,7 @@ def get_first_goal_analytics(team: str, league_key: str = "soccer_epl") -> dict:
         league_id = _LEAGUE_IDS.get(league_key, 39)
         conn_sc = sqlite3.connect(DB_PATH)
 
-        # 1. scorer_stats — реальная статистика голов по минутам
+
         row = conn_sc.execute("""
             SELECT player_name, total_goals, avg_minute, first_goal_rate
             FROM scorer_stats
@@ -666,7 +609,7 @@ def get_first_goal_analytics(team: str, league_key: str = "soccer_epl") -> dict:
             conn_sc.close()
             return result
 
-        # 2. Топ-бомбардиры из live_stats (API-Football)
+
         row2 = conn_sc.execute(
             "SELECT data_json FROM live_stats WHERE team=? AND stat_type='topscorers'",
             (f"topscorers_{league_id}",)
@@ -683,7 +626,7 @@ def get_first_goal_analytics(team: str, league_key: str = "soccer_epl") -> dict:
                     if goals > 0:
                         result = {
                             "player":     sc["player_name"],
-                            "avg_min":    28,  # дефолт если нет событий
+                            "avg_min":    28,
                             "confidence": min(0.85, 0.45 + goals * 0.02),
                             "freq":       min(0.85, 0.45 + goals * 0.02),
                             "goals":      goals,
@@ -697,7 +640,7 @@ def get_first_goal_analytics(team: str, league_key: str = "soccer_epl") -> dict:
     except Exception as e:
         log.debug(f"scorer_stats lookup error: {e}")
 
-    # Проверяем кеш в БД (TTL 7 дней)
+
     try:
         conn_fg = sqlite3.connect(DB_PATH)
         conn_fg.execute("""
@@ -727,7 +670,7 @@ def get_first_goal_analytics(team: str, league_key: str = "soccer_epl") -> dict:
     except Exception:
         pass
 
-    # Claude web search
+
     from agent_collector import ANTHROPIC_API_KEY as _ak, _claude_search, _parse_json_from_text
     if not _ak:
         _first_goal_cache[key] = None
@@ -759,7 +702,7 @@ If no clear candidate, return:
                 "freq":        float(parsed.get("confidence", 0.5)),
                 "is_our_team": True,
             }
-            # Сохраняем в БД
+
             try:
                 import json as _json
                 from datetime import datetime as _dt, timezone as _tz
@@ -785,13 +728,6 @@ If no clear candidate, return:
 def get_first_goal_prediction(home: str, away: str,
                                lambda_h: float, lambda_a: float,
                                league_key: str = "soccer_epl") -> tuple:
-    """
-    Возвращает (player_name, team_name, minute, confidence_pct) или None.
-    Логика:
-      1. Смотрим аналитику первого гола обеих команд
-      2. Берём кандидата с наибольшей confidence × λ своей команды
-      3. Возвращаем только если итоговая уверенность >= 60%
-    """
     total = lambda_h + lambda_a
     p_home_first = lambda_h / total if total > 0 else 0.5
     p_away_first = lambda_a / total if total > 0 else 0.5
@@ -814,12 +750,12 @@ def get_first_goal_prediction(home: str, away: str,
     if not candidates:
         return None
 
-    # Лучший кандидат
+
     best = max(candidates, key=lambda x: x[3])
     player, team, minute, confidence = best
     confidence_pct = int(confidence * 100)
 
-    # Возвращаем только если уверенность >= 45%
+
     if confidence_pct < 45:
         return None
 
@@ -827,7 +763,6 @@ def get_first_goal_prediction(home: str, away: str,
 
 
 def prefetch_all_scorers(teams: list):
-    """Совместимость: теперь загружаем аналитику первого гола."""
     log.info("📊 Загружаю аналитику первого гола...")
     for team in set(teams):
         if f"fg_{team}" not in _first_goal_cache:
